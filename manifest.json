@@ -1,6 +1,6 @@
 {
   "name": "Moppedtagebuch",
-  "short_name": "Mopped",
+  "short_name": "Moppedtagebuch",
   "start_url": ".",
   "display": "standalone",
   "background_color": "#1a1a1a",
