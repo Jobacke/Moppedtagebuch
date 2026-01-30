@@ -14,6 +14,7 @@ export function useCollection(collectionName) {
             return;
         }
 
+        // Path: users/{uid}/{collectionName} (3 segments - Valid for Collection)
         const q = query(collection(db, `users/${currentUser.uid}/${collectionName}`), orderBy('date', 'desc'));
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const docs = [];
@@ -51,7 +52,9 @@ export function useDocument(docName) {
             return;
         }
 
-        const unsubscribe = onSnapshot(doc(db, `users/${currentUser.uid}`, docName), (docSnapshot) => {
+        // Path: users/{uid}/data/{docName} (4 segments - Valid for Document)
+        // We added 'data' intermediate collection to resolve the "odd segments" error
+        const unsubscribe = onSnapshot(doc(db, `users/${currentUser.uid}/data`, docName), (docSnapshot) => {
             if (docSnapshot.exists()) {
                 setData(docSnapshot.data());
             } else {
@@ -65,7 +68,7 @@ export function useDocument(docName) {
 
     const update = async (newData) => {
         if (!currentUser) return;
-        await setDoc(doc(db, `users/${currentUser.uid}`, docName), newData, { merge: true });
+        await setDoc(doc(db, `users/${currentUser.uid}/data`, docName), newData, { merge: true });
     }
 
     return { data, update, loading };

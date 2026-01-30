@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { auth } from '../firebase';
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
+import { Bike } from 'lucide-react';
 
 const AuthContext = createContext();
 
@@ -40,9 +41,28 @@ export function AuthProvider({ children }) {
         logout
     };
 
+    if (loading) {
+        return (
+            <div style={{
+                height: '100vh',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: '#121212',
+                color: 'var(--kawasaki-green)'
+            }}>
+                <div className="shake" style={{ marginBottom: '1rem' }}>
+                    <Bike size={48} />
+                </div>
+                <p>Lade Moppedtagebuch...</p>
+            </div>
+        );
+    }
+
     return (
         <AuthContext.Provider value={value}>
-            {!loading && children}
+            {children}
         </AuthContext.Provider>
     );
 }

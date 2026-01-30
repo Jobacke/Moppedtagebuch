@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { Lock, Bike, Settings, DollarSign, Wrench, Package, LogOut } from 'lucide-react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -8,42 +8,53 @@ import Finance from './components/Finance';
 import Service from './components/Service';
 import Accessories from './components/Accessories';
 import Login from './components/Login';
+import PinLock from './components/PinLock';
+import ErrorBoundary from './components/ErrorBoundary';
 import './index.css';
 
 function App() {
   return (
-    <AuthProvider>
-      <MainRouter />
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <MainRouter />
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }
 
 function MainRouter() {
   const { currentUser } = useAuth();
+  const [isLocked, setIsLocked] = useState(true);
+  const [pin, setPin] = useState(localStorage.getItem('mopped_pin') || '1234');
 
+  // If not logged in via Firebase -> Show Login
   if (!currentUser) {
     return <Login />;
   }
 
+  // If logged in but locked -> Show PinLock
+  if (isLocked) {
+    const checkPin = (inputPin) => {
+      if (inputPin === pin) {
+        setIsLocked(false);
+        return true;
+      }
+      return false;
+    };
+    return <PinLock onUnlock={checkPin} />;
+  }
+
+  // App Content
   return (
     <Router basename={import.meta.env.BASE_URL}>
-      <MainLayout />
+      <MainLayout onLock={() => setIsLocked(true)} />
     </Router>
   );
 }
 
-function MainLayout() {
+function MainLayout({ onLock }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { logout } = useAuth();
-
-  const handleLogout = async () => {
-    try {
-      await logout();
-    } catch {
-      console.error("Failed to log out");
-    }
-  };
 
   const navItems = [
     { path: '/', label: 'Übersicht', icon: <Bike size={24} /> },
@@ -57,8 +68,8 @@ function MainLayout() {
     <div className="app-container fade-in">
       <header style={{ padding: '1rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1 style={{ margin: 0, fontSize: '1.25rem', color: 'var(--kawasaki-green)' }}>Moppedtagebuch</h1>
-        <button onClick={handleLogout} style={{ background: 'none', color: 'var(--text-secondary)' }}>
-          <LogOut size={20} />
+        <button onClick={onLock} style={{ background: 'none', color: 'var(--text-secondary)' }}>
+          <Lock size={20} />
         </button>
       </header>
 
