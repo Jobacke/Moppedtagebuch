@@ -36,7 +36,7 @@ Die App ist bereits für das Hosting auf GitHub Pages konfiguriert.
    git add .
    git commit -m "Initial commit"
    git branch -M main
-   git remote add origin https://github.com/DEIN_USERNAME/Moppedtagebuch.git
+   git remote add origin https://github.com/Jobacke/Moppedtagebuch.git
    git push -u origin main
    ```
 3. Deployment starten:
