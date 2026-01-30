@@ -4,15 +4,15 @@ Eine moderne Web-App (PWA) zur Verwaltung aller Daten rund um deine Kawasaki Ver
 
 ## Features
 
-- **🔒 Pin-Sperre**: Sicherer und einfacher Zugriffsschutz (Default Pin: `1234`).
-- **⚙️ Technische Daten**: Alle wichtigen Spezifikationen auf einen Blick (im "Bearbeiten"-Modus änderbar).
-- **💰 Finanzen**: Erfassung von Ausgaben (Tanken, Versicherung, etc.).
-- **🔧 Service & Wartung**: Digitales Scheckheft für Wartungsarbeiten.
-- **📦 Zubehör**: Verwaltung von Anbauteilen mit Preisen und Kaufdatum.
-- **📱 PWA-Ready**: Kann auf dem Smartphone "zum Home-Bildschirm" hinzugefügt werden und fühlt sich wie eine native App an.
-- **🌙 Dark Mode**: Optimiert für OLED-Screens und nächtliche Nutzung.
+- **🔐 Cloud Login**: Sichere Anmeldung via E-Mail & Passwort (Google Firebase).
+- **☁️ Sync**: Deine Daten (Tanken, Service, Umbauten) werden sicher in der Cloud gespeichert und sind auf allen Geräten synchron.
+- **⚙️ Technik**: Technische Daten & aktueller KM-Stand.
+- **💰 Finanzen**: Ausgaben-Tracker mit Kategorien und Summen.
+- **🔧 Service**: Digitales Scheckheft mit Erinnerung an den nächsten Service.
+- **📦 Zubehör**: Verwaltung von Anbauteilen.
+- **📱 PWA**: Installierbar als App auf Android & iOS.
 
-## Installation & Start
+## Einrichtung
 
 1. **Abhängigkeiten installieren:**
    ```bash
@@ -23,37 +23,24 @@ Eine moderne Web-App (PWA) zur Verwaltung aller Daten rund um deine Kawasaki Ver
    ```bash
    npm run dev
    ```
-   Die App ist dann unter `http://localhost:5173` erreichbar.
+   Öffne dann `http://localhost:5173/Moppedtagebuch/`.
 
-## Deployment auf GitHub Pages
+## Deployment
 
-Die App ist bereits für das Hosting auf GitHub Pages konfiguriert.
+Die App wird automatisch via GitHub Pages bereitgestellt:
+[https://Jobacke.github.io/Moppedtagebuch/](https://Jobacke.github.io/Moppedtagebuch/)
 
-1. Erstelle ein neues Repository auf GitHub mit dem Namen `Moppedtagebuch`.
-2. Verknüpfe den lokalen Ordner mit dem Repository:
-   ```bash
-   git init
-   git add .
-   git commit -m "Initial commit"
-   git branch -M main
-   git remote add origin https://github.com/Jobacke/Moppedtagebuch.git
-   git push -u origin main
-   ```
-3. Deployment starten:
-   ```bash
-   npm run deploy
-   ```
-   
-**Wichtig:** Falls dein Repository anders heißt als `Moppedtagebuch`, musst du in der Datei `vite.config.js` den Wert für `base` entsprechend anpassen (z.B. `/DeinRepoName/`).
+## Sicherheit
 
-## Anpassungen
+Die Datenbank regeln (Firestore Rules) sollten so eingestellt sein, dass nur der eigene Nutzer auf seine Daten zugreifen kann:
 
-- **Pin ändern**: Der Pin wird aktuell im LocalStorage gespeichert. Die Logik befindet sich in `src/App.jsx`.
-- **Icon**: Das App-Icon liegt unter `public/icon.png`.
-
-## Tech Stack
-
-- React (Vite)
-- CSS Modules / Glassmorphism Design
-- Lucide React Icons
-- LocalStorage für Datenhaltung (Client-Side Only)
+```
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}
+```

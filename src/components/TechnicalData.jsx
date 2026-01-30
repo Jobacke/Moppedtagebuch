@@ -1,12 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { Settings, Save } from 'lucide-react';
+import { useDocument } from '../hooks/useFirestore';
 
 const TechnicalData = () => {
-    const [data, setData] = useState({
+    const { data: remoteData, update, loading } = useDocument('technical_data');
+    const [localData, setLocalData] = useState({
         manufacturer: 'Kawasaki',
         model: 'Versys 1000 SE',
         year: '2021',
         licensePlate: 'M-N 594',
+        currentKm: '12450',
+        nextServiceDue: '15000',
         vin: '',
         engine: '1043 ccm Inline-4',
         power: '120 PS (88 kW)',
@@ -21,21 +25,22 @@ const TechnicalData = () => {
     const [isEditing, setIsEditing] = useState(false);
 
     useEffect(() => {
-        const saved = localStorage.getItem('mopped_tech_data');
-        if (saved) {
-            setData(JSON.parse(saved));
+        if (remoteData) {
+            setLocalData(remoteData);
         }
-    }, []);
+    }, [remoteData]);
 
     const handleChange = (e) => {
         const { name, value } = e.target;
-        setData(prev => ({ ...prev, [name]: value }));
+        setLocalData(prev => ({ ...prev, [name]: value }));
     };
 
-    const handleSave = () => {
-        localStorage.setItem('mopped_tech_data', JSON.stringify(data));
+    const handleSave = async () => {
+        await update(localData);
         setIsEditing(false);
     };
+
+    if (loading) return <div className="loading">Laden...</div>;
 
     return (
         <div className="section-container fade-in">
@@ -57,7 +62,7 @@ const TechnicalData = () => {
             </div>
 
             <div className="glass-panel" style={{ padding: '1rem' }}>
-                {Object.entries(data).map(([key, value]) => (
+                {Object.entries(localData).map(([key, value]) => (
                     <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: '1px solid var(--border-color)' }}>
                         <span style={{ color: 'var(--text-secondary)', textTransform: 'capitalize', width: '40%' }}>
                             {key.replace(/([A-Z])/g, ' $1').trim()}

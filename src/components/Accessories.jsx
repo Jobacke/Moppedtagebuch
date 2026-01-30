@@ -1,37 +1,31 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Package, Plus, Trash2 } from 'lucide-react';
+import { useCollection } from '../hooks/useFirestore';
 
 const Accessories = () => {
-    const [items, setItems] = useState([]);
+    const { data: items, add, remove, loading } = useCollection('accessories');
     const [showForm, setShowForm] = useState(false);
     const [newItem, setNewItem] = useState({ name: '', brand: '', date: '', price: '', installed: true });
 
-    useEffect(() => {
-        const saved = localStorage.getItem('mopped_accessories');
-        if (saved) setItems(JSON.parse(saved));
-    }, []);
-
-    const saveItems = (updated) => {
-        setItems(updated);
-        localStorage.setItem('mopped_accessories', JSON.stringify(updated));
-    };
-
-    const handleAdd = (e) => {
+    const handleAdd = async (e) => {
         e.preventDefault();
         if (!newItem.name || !newItem.price) return;
-        const item = { ...newItem, id: Date.now() };
-        saveItems([item, ...items]);
+
+        await add(newItem);
+
         setNewItem({ name: '', brand: '', date: '', price: '', installed: true });
         setShowForm(false);
     };
 
-    const handleDelete = (id) => {
+    const handleDelete = async (id) => {
         if (confirm('Zubehör entfernen?')) {
-            saveItems(items.filter(i => i.id !== id));
+            await remove(id);
         }
     };
 
-    const totalValue = items.reduce((sum, item) => sum + parseFloat(item.price || 0), 0);
+    const totalValue = items ? items.reduce((sum, item) => sum + parseFloat(item.price || 0), 0) : 0;
+
+    if (loading) return <div className="loading">Laden...</div>;
 
     return (
         <div className="section-container fade-in">

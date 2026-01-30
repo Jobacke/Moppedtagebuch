@@ -1,35 +1,29 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Plus, Trash2, Calendar, Wrench } from 'lucide-react';
+import { useCollection } from '../hooks/useFirestore';
 
 const Service = () => {
-    const [logs, setLogs] = useState([]);
+    const { data: logs, add, remove, loading } = useCollection('service');
     const [adding, setAdding] = useState(false);
     const [newLog, setNewLog] = useState({ date: '', km: '', work: '', nextDue: '', cost: '' });
 
-    useEffect(() => {
-        const saved = localStorage.getItem('mopped_service');
-        if (saved) setLogs(JSON.parse(saved));
-    }, []);
-
-    const saveLogs = (updated) => {
-        setLogs(updated);
-        localStorage.setItem('mopped_service', JSON.stringify(updated));
-    };
-
-    const handleAdd = (e) => {
+    const handleAdd = async (e) => {
         e.preventDefault();
         if (!newLog.work || !newLog.date) return;
-        const log = { ...newLog, id: Date.now() };
-        saveLogs([log, ...logs]);
+
+        await add(newLog);
+
         setNewLog({ date: '', km: '', work: '', nextDue: '', cost: '' });
         setAdding(false);
     };
 
-    const handleDelete = (id) => {
+    const handleDelete = async (id) => {
         if (confirm('Eintrag löschen?')) {
-            saveLogs(logs.filter(l => l.id !== id));
+            await remove(id);
         }
     };
+
+    if (loading) return <div className="loading">Laden...</div>;
 
     return (
         <div className="section-container fade-in">

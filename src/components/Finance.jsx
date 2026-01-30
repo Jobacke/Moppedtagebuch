@@ -1,37 +1,31 @@
-import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, DollarSign } from 'lucide-react';
+import React, { useState } from 'react';
+import { Plus, Trash2 } from 'lucide-react';
+import { useCollection } from '../hooks/useFirestore';
 
 const Finance = () => {
-    const [expenses, setExpenses] = useState([]);
+    const { data: expenses, add, remove, loading } = useCollection('finance');
     const [newExpense, setNewExpense] = useState({ date: '', desc: '', amount: '', cat: 'Fuel' });
     const [showForm, setShowForm] = useState(false);
 
-    useEffect(() => {
-        const saved = localStorage.getItem('mopped_finance');
-        if (saved) setExpenses(JSON.parse(saved));
-    }, []);
-
-    const saveExpenses = (updated) => {
-        setExpenses(updated);
-        localStorage.setItem('mopped_finance', JSON.stringify(updated));
-    };
-
-    const handleAdd = (e) => {
+    const handleAdd = async (e) => {
         e.preventDefault();
         if (!newExpense.amount || !newExpense.desc) return;
-        const expense = { ...newExpense, id: Date.now() };
-        saveExpenses([expense, ...expenses]);
+
+        await add(newExpense);
+
         setNewExpense({ date: '', desc: '', amount: '', cat: 'Fuel' });
         setShowForm(false);
     };
 
-    const handleDelete = (id) => {
+    const handleDelete = async (id) => {
         if (confirm('Eintrag löschen?')) {
-            saveExpenses(expenses.filter(ex => ex.id !== id));
+            await remove(id);
         }
     };
 
-    const total = expenses.reduce((sum, item) => sum + parseFloat(item.amount || 0), 0);
+    const total = expenses ? expenses.reduce((sum, item) => sum + parseFloat(item.amount || 0), 0) : 0;
+
+    if (loading) return <div className="loading">Laden...</div>;
 
     return (
         <div className="section-container fade-in">

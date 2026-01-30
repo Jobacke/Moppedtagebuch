@@ -1,36 +1,32 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { BrowserRouter as Router, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
-import { ShieldCheck, Lock, Unlock, Bike, Wrench, DollarSign, Package, Settings, LogOut } from 'lucide-react';
+import { Lock, Bike, Settings, DollarSign, Wrench, Package, LogOut } from 'lucide-react';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Dashboard from './components/Dashboard';
 import TechnicalData from './components/TechnicalData';
 import Finance from './components/Finance';
 import Service from './components/Service';
 import Accessories from './components/Accessories';
-import PinLock from './components/PinLock';
+import Login from './components/Login';
 import './index.css';
 
 function App() {
-  const [isLocked, setIsLocked] = useState(true);
-  const [pin, setPin] = useState(localStorage.getItem('mopped_pin') || '1234');
+  return (
+    <AuthProvider>
+      <MainRouter />
+    </AuthProvider>
+  );
+}
 
-  const checkPin = (inputPin) => {
-    if (inputPin === pin) {
-      setIsLocked(false);
-      return true;
-    }
-    return false;
-  };
+function MainRouter() {
+  const { currentUser } = useAuth();
 
-  useEffect(() => {
-    // Auto-lock on idle could be added here
-  }, []);
-
-  if (isLocked) {
-    return <PinLock onUnlock={checkPin} />;
+  if (!currentUser) {
+    return <Login />;
   }
 
   return (
-    <Router>
+    <Router basename={import.meta.env.BASE_URL}>
       <MainLayout />
     </Router>
   );
@@ -39,6 +35,15 @@ function App() {
 function MainLayout() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { logout } = useAuth();
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch {
+      console.error("Failed to log out");
+    }
+  };
 
   const navItems = [
     { path: '/', label: 'Übersicht', icon: <Bike size={24} /> },
@@ -52,8 +57,8 @@ function MainLayout() {
     <div className="app-container fade-in">
       <header style={{ padding: '1rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1 style={{ margin: 0, fontSize: '1.25rem', color: 'var(--kawasaki-green)' }}>Moppedtagebuch</h1>
-        <button onClick={() => window.location.reload()} style={{ background: 'none', color: 'var(--text-secondary)' }}>
-          <Lock size={20} />
+        <button onClick={handleLogout} style={{ background: 'none', color: 'var(--text-secondary)' }}>
+          <LogOut size={20} />
         </button>
       </header>
 
