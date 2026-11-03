@@ -4,6 +4,7 @@ import { ref, uploadBytesResumable, uploadBytes, getDownloadURL, deleteObject } 
 import { collection, addDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
 import { useAuth } from '../contexts/AuthContext';
 import { transcodeVideoToWebMp4, generateVideoPosterBlob } from '../utils/videoOptimizer';
+import { cacheVideoBlob, evictVideoFromCache } from '../utils/videoCache';
 
 export function useStorage() {
     const [progress, setProgress] = useState(0);
@@ -62,10 +63,10 @@ export function useStorage() {
         const originalSizeMB = (rawFile.size / (1024 * 1024)).toFixed(1);
 
         if (isVideo) {
-            setStatusText(`Komprimiere Video (${originalSizeMB} MB → HD-Stream)`);
+            setStatusText(`Optimiere Video auf 1080p Full-HD (${originalSizeMB} MB)...`);
             const [transcodeResult, thumbBlob] = await Promise.all([
                 transcodeVideoToWebMp4(rawFile, (pct) => {
-                    // Phase 1: 0% -> 55% = Hardware-Komprimierung
+                    // Phase 1: 0% -> 55% = Hardware Full-HD Optimierung
                     const mapped = Math.max(1, Math.round(pct * 0.55));
                     realProgressRef.current = mapped;
                     setProgress(mapped);
@@ -73,14 +74,14 @@ export function useStorage() {
                 generateVideoPosterBlob(rawFile)
             ]);
             file = transcodeResult?.file || rawFile;
-            wasCompressed = Boolean(transcodeResult?.wasCompressed || file.size < 25 * 1024 * 1024);
+            wasCompressed = Boolean(transcodeResult?.wasCompressed || file.size < 55 * 1024 * 1024);
             posterBlob = thumbBlob;
         }
 
         const compressedSizeMB = (file.size / (1024 * 1024)).toFixed(1);
         setStatusText(
             isVideo && file.size < rawFile.size
-                ? `Lade optimiertes HD-Video hoch (${compressedSizeMB} MB statt ${originalSizeMB} MB)`
+                ? `Lade 1080p Full-HD Video hoch (${compressedSizeMB} MB statt ${originalSizeMB} MB)`
                 : 'Lade Datei hoch'
         );
         setBytesInfo({ transferred: 0, total: file.size || 0 });
@@ -94,7 +95,6 @@ export function useStorage() {
         const filePath = `users/${currentUser.uid}/gallery/${timestamp}_${safeName}`;
         const storageRef = ref(storage, filePath);
 
-        // Upload Poster Thumbnail in parallel if available
         let posterUploadPromise = Promise.resolve(null);
         let thumbPath = null;
         if (posterBlob) {
@@ -142,6 +142,11 @@ export function useStorage() {
                             posterUploadPromise
                         ]);
 
+                        if (isVideo) {
+                            // Sofort im lokalen Geräte-Cache hinterlegen -> 0 ms Startzeit beim Abspielen!
+                            await cacheVideoBlob(url, file);
+                        }
+
                         await addDoc(collection(db, `users/${currentUser.uid}/photos`), {
                             url,
                             filePath,
@@ -151,6 +156,7 @@ export function useStorage() {
                             mimeType: contentType,
                             mediaType: isVideo ? 'video' : 'image',
                             webOptimized: isVideo ? wasCompressed : true,
+                            qualityProfile: isVideo ? '1080p-hq' : 'original',
                             date: new Date().toISOString()
                         });
 
@@ -171,9 +177,8 @@ export function useStorage() {
     };
 
     /**
-     * Optimiert ein bereits hochgeladenes schweres Video (z.B. 134 MB) nachträglich:
-     * Lädt es herunter, komprimiert es auf schlankes 720p HD (~2,4 Mbps, FastStart),
-     * ersetzt die Datei in Firebase Storage und aktualisiert den Firestore-Eintrag.
+     * Optimiert ein bereits hochgeladenes schweres Video (z.B. 134 MB 4K) nachträglich
+     * auf kristallklares 1080p Full-HD (~8,5 - 9,5 Mbit/s, 50/60fps, FastStart).
      */
     const optimizeExistingVideoInCloud = async (videoItem) => {
         if (!currentUser || !videoItem?.id || !videoItem?.url || isUploading) return null;
@@ -185,13 +190,13 @@ export function useStorage() {
             setProgress(2);
             realProgressRef.current = 2;
             setBytesInfo({ transferred: 0, total: 0 });
-            setStatusText('Lade Original-Video für HD-Komprimierung...');
+            setStatusText('Lade Original-Video für 1080p Full-HD Optimierung...');
 
             const response = await fetch(videoItem.url);
             const rawBlob = await response.blob();
             const originalMB = (rawBlob.size / (1024 * 1024)).toFixed(1);
 
-            setStatusText(`Komprimiere ${originalMB} MB Video auf flüssiges HD...`);
+            setStatusText(`Optimiere ${originalMB} MB Video auf 1080p Full-HD...`);
             const [transcodeResult, posterBlob] = await Promise.all([
                 transcodeVideoToWebMp4(rawBlob, (pct) => {
                     const mapped = 10 + Math.round(pct * 0.55);
@@ -202,15 +207,15 @@ export function useStorage() {
             ]);
 
             const finalFile = transcodeResult?.file || rawBlob;
-            const wasCompressed = Boolean(transcodeResult?.wasCompressed || finalFile.size < 25 * 1024 * 1024);
+            const wasCompressed = Boolean(transcodeResult?.wasCompressed || finalFile.size < 55 * 1024 * 1024);
             const newMB = (finalFile.size / (1024 * 1024)).toFixed(1);
-            setStatusText(`Speichere optimiertes Video (${newMB} MB statt ${originalMB} MB)...`);
+            setStatusText(`Speichere 1080p Full-HD Video (${newMB} MB statt ${originalMB} MB)...`);
             setBytesInfo({ transferred: 0, total: finalFile.size });
             startSmoothProgressTimer();
 
             const cacheControl = 'public, max-age=31536000, immutable';
             const timestamp = Date.now();
-            const newFilePath = `users/${currentUser.uid}/gallery/${timestamp}_hd_${videoItem.id}.mp4`;
+            const newFilePath = `users/${currentUser.uid}/gallery/${timestamp}_fullhd_${videoItem.id}.mp4`;
             const storageRef = ref(storage, newFilePath);
 
             let posterUploadPromise = Promise.resolve(videoItem.posterUrl || null);
@@ -247,6 +252,11 @@ export function useStorage() {
                             posterUploadPromise
                         ]);
 
+                        await cacheVideoBlob(newUrl, finalFile);
+                        if (videoItem.url && videoItem.url !== newUrl) {
+                            await evictVideoFromCache(videoItem.url);
+                        }
+
                         const patch = {
                             url: newUrl,
                             filePath: newFilePath,
@@ -254,12 +264,12 @@ export function useStorage() {
                             sizeBytes: finalFile.size,
                             mimeType: 'video/mp4',
                             mediaType: 'video',
-                            webOptimized: wasCompressed
+                            webOptimized: wasCompressed,
+                            qualityProfile: '1080p-hq'
                         };
 
                         await setDoc(doc(db, `users/${currentUser.uid}/photos`, videoItem.id), patch, { merge: true });
 
-                        // Alte 134-MB-Datei aus dem Cloud-Speicher löschen, um Speicherplatz freizugeben!
                         if (videoItem.filePath && videoItem.filePath !== newFilePath) {
                             await deleteObject(ref(storage, videoItem.filePath)).catch(() => {});
                         }
@@ -305,9 +315,12 @@ export function useStorage() {
         }
     };
 
-    const deleteFile = async (id, filePath, thumbPath) => {
+    const deleteFile = async (id, filePath, thumbPath, url) => {
         if (!currentUser) return;
         try {
+            if (url) {
+                await evictVideoFromCache(url);
+            }
             if (filePath) {
                 const storageRef = ref(storage, filePath);
                 await deleteObject(storageRef).catch(() => {});

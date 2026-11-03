@@ -1,7 +1,8 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Camera, Trash2, X, Plus, Image as ImageIcon, Play, Film, Loader2, Zap, CheckCircle2 } from 'lucide-react';
 import { useCollection } from '../hooks/useFirestore';
 import { useStorage } from '../hooks/useStorage';
+import { getCachedVideoBlob, warmVideoInCache } from '../utils/videoCache';
 
 const isVideoItem = (item) => {
     if (!item) return false;
@@ -31,9 +32,80 @@ const Gallery = () => {
     } = useStorage();
 
     const [selectedImg, setSelectedImg] = useState(null);
+    const [resolvedVideoSrc, setResolvedVideoSrc] = useState(null);
     const [isVideoBuffering, setIsVideoBuffering] = useState(false);
     const playerRef = useRef(null);
+    const activeObjectUrlRef = useRef(null);
     const posterCapturedForIdRef = useRef(new Set());
+
+    // Beim Öffnen der Galerie: Videos im Hintergrund in den lokalen Geräte-Cache vorladen,
+    // damit sie beim Antippen mit 0 ms Ladezeit direkt aus dem lokalen Speicher starten!
+    useEffect(() => {
+        if (!photos || photos.length === 0) return;
+        const videos = photos.filter((p) => isVideoItem(p) && p.url);
+        let cancelled = false;
+
+        (async () => {
+            for (const v of videos.slice(0, 4)) {
+                if (cancelled) break;
+                await warmVideoInCache(v.url);
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [photos]);
+
+    // ObjectURL sauber aufräumen, wenn das Modal geschlossen oder gewechselt wird
+    useEffect(() => {
+        return () => {
+            if (activeObjectUrlRef.current) {
+                URL.revokeObjectURL(activeObjectUrlRef.current);
+                activeObjectUrlRef.current = null;
+            }
+        };
+    }, []);
+
+    const closeModal = () => {
+        if (activeObjectUrlRef.current) {
+            URL.revokeObjectURL(activeObjectUrlRef.current);
+            activeObjectUrlRef.current = null;
+        }
+        setResolvedVideoSrc(null);
+        setSelectedImg(null);
+        setIsVideoBuffering(false);
+    };
+
+    const openItemModal = async (item) => {
+        if (activeObjectUrlRef.current) {
+            URL.revokeObjectURL(activeObjectUrlRef.current);
+            activeObjectUrlRef.current = null;
+        }
+
+        if (!isVideoItem(item)) {
+            setResolvedVideoSrc(null);
+            setIsVideoBuffering(false);
+            setSelectedImg(item);
+            return;
+        }
+
+        setSelectedImg(item);
+        setIsVideoBuffering(true);
+
+        // Prüfen, ob das Video bereits im schnellen lokalen Geräte-Cache liegt
+        const cachedBlob = await getCachedVideoBlob(item.url);
+        if (cachedBlob) {
+            const localUrl = URL.createObjectURL(cachedBlob);
+            activeObjectUrlRef.current = localUrl;
+            setResolvedVideoSrc(localUrl);
+            setIsVideoBuffering(false);
+        } else {
+            // Sofort per Stream starten und parallel für das nächste Mal lokal cachen
+            setResolvedVideoSrc(item.url);
+            warmVideoInCache(item.url);
+        }
+    };
 
     const handleFileChange = async (e) => {
         const file = e.target.files[0];
@@ -53,8 +125,8 @@ const Gallery = () => {
     const handleDelete = async (e, item, isVideo) => {
         e.stopPropagation();
         if (window.confirm(`Möchtest du dieses ${isVideo ? 'Video' : 'Foto'} wirklich löschen?`)) {
-            await deleteFile(item.id, item.filePath, item.thumbPath);
-            if (selectedImg?.id === item.id) setSelectedImg(null);
+            await deleteFile(item.id, item.filePath, item.thumbPath, item.url);
+            if (selectedImg?.id === item.id) closeModal();
         }
     };
 
@@ -63,17 +135,11 @@ const Gallery = () => {
         try {
             const updated = await optimizeExistingVideoInCloud(item);
             if (updated && selectedImg?.id === item.id) {
-                setSelectedImg(updated);
-                setIsVideoBuffering(false);
+                await openItemModal(updated);
             }
         } catch (err) {
             alert('Komprimierung fehlgeschlagen: ' + err.message);
         }
-    };
-
-    const openItemModal = (item) => {
-        setIsVideoBuffering(isVideoItem(item));
-        setSelectedImg(item);
     };
 
     const handleVideoLoadedData = (item, videoEl) => {
@@ -81,9 +147,9 @@ const Gallery = () => {
         if (!item || item.posterUrl || posterCapturedForIdRef.current.has(item.id) || !videoEl) return;
 
         try {
-            const vw = videoEl.videoWidth || 640;
-            const vh = videoEl.videoHeight || 360;
-            const maxDim = 640;
+            const vw = videoEl.videoWidth || 960;
+            const vh = videoEl.videoHeight || 540;
+            const maxDim = 960;
             const scale = Math.min(1, maxDim / Math.max(vw, vh));
             const canvas = document.createElement('canvas');
             canvas.width = Math.max(1, Math.round(vw * scale));
@@ -98,15 +164,15 @@ const Gallery = () => {
                     }
                 },
                 'image/jpeg',
-                0.82
+                0.90
             );
         } catch {
             // ignore CORS
         }
     };
 
-    // Prüfen, ob in der Galerie noch unkomprimierte Videos liegen (z.B. > 28 MB oder ohne echtes HD-Downsizing)
-    const isTrulyOptimized = (p) => Boolean(p.webOptimized && (!p.sizeBytes || p.sizeBytes < 35 * 1024 * 1024));
+    // Ein Video gilt als optimal, wenn es webOptimized ist und <= 58 MB hat (1080p Full-HD @ ~8,5-9,5 Mbit/s)
+    const isTrulyOptimized = (p) => Boolean(p.webOptimized && (!p.sizeBytes || p.sizeBytes < 58 * 1024 * 1024));
     const unoptimizedVideos = (photos || []).filter((p) => isVideoItem(p) && !isTrulyOptimized(p));
 
     return (
@@ -118,7 +184,7 @@ const Gallery = () => {
                         <Camera className="icon-green" /> Galerie
                     </h2>
                     <p style={{ margin: '0.25rem 0 0 0', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-                        Fotos & Videos (automatisch HD-optimiert)
+                        Fotos & Videos (1080p Full-HD • Verlustfrei optimiert)
                     </p>
                 </div>
 
@@ -147,9 +213,9 @@ const Gallery = () => {
                     }}
                 >
                     <div style={{ fontSize: '0.84rem', color: 'var(--text-primary)', lineHeight: 1.4 }}>
-                        <strong style={{ color: 'var(--kawasaki-green)' }}>⚡ Turbo-Optimierung verfügbar:</strong>{' '}
+                        <strong style={{ color: 'var(--kawasaki-green)' }}>⚡ 1080p Full-HD Optimierung verfügbar:</strong>{' '}
                         {unoptimizedVideos.length === 1
-                            ? 'Dein vorhandenes Video ist noch unkomprimiert (Originalgröße) und ruckelt deshalb beim Streamen.'
+                            ? 'Ein vorhandenes Video ist noch unkomprimiert (Originalgröße) und kann jetzt ohne sichtbaren Qualitätsverlust auf 1080p Full-HD optimiert werden.'
                             : `${unoptimizedVideos.length} vorhandene Videos sind noch unkomprimiert.`}
                     </div>
                     <button
@@ -173,7 +239,7 @@ const Gallery = () => {
                         }}
                     >
                         <Zap size={15} />
-                        Jetzt auf HD komprimieren
+                        Jetzt auf 1080p Full-HD optimieren
                     </button>
                 </div>
             )}
@@ -223,6 +289,8 @@ const Gallery = () => {
                     return (
                         <div key={photo.id}
                             className="photo-item"
+                            onMouseEnter={() => isVideo && warmVideoInCache(photo.url)}
+                            onTouchStart={() => isVideo && warmVideoInCache(photo.url)}
                             onClick={() => openItemModal(photo)}
                             style={{
                                 position: 'relative',
@@ -297,7 +365,7 @@ const Gallery = () => {
                                     }}>
                                         <Film size={12} />
                                         {isTrulyOptimized(photo)
-                                            ? `HD${photo.sizeBytes ? ` • ${formatMB(photo.sizeBytes)}` : ''}`
+                                            ? `Full-HD${photo.sizeBytes ? ` • ${formatMB(photo.sizeBytes)}` : ''}`
                                             : `Video${photo.sizeBytes ? ` (${formatMB(photo.sizeBytes)})` : ''}`}
                                     </div>
                                 </>
@@ -339,7 +407,7 @@ const Gallery = () => {
             {selectedImg && (
                 <div
                     className="modal-backdrop"
-                    onClick={() => setSelectedImg(null)}
+                    onClick={closeModal}
                     style={{
                         position: 'fixed', top: 0, left: 0, width: '100%', height: '100%',
                         background: 'rgba(0,0,0,0.95)',
@@ -353,7 +421,7 @@ const Gallery = () => {
                         style={{
                             position: 'relative',
                             width: '100%',
-                            maxWidth: '900px',
+                            maxWidth: '960px',
                             maxHeight: '85vh',
                             display: 'flex',
                             flexDirection: 'column',
@@ -379,34 +447,36 @@ const Gallery = () => {
                                     }}>
                                         <Loader2 size={36} className="spin-icon" />
                                         <span style={{ fontSize: '0.8rem', color: '#ccc', background: 'rgba(0,0,0,0.6)', padding: '3px 10px', borderRadius: '99px' }}>
-                                            Lade Video-Stream...
+                                            Lade 1080p Full-HD Stream...
                                         </span>
                                     </div>
                                 )}
-                                <video
-                                    key={selectedImg.url}
-                                    ref={playerRef}
-                                    src={selectedImg.url}
-                                    poster={selectedImg.posterUrl || undefined}
-                                    controls
-                                    autoPlay
-                                    playsInline
-                                    preload="auto"
-                                    onCanPlay={() => setIsVideoBuffering(false)}
-                                    onPlaying={() => setIsVideoBuffering(false)}
-                                    onWaiting={() => setIsVideoBuffering(true)}
-                                    onLoadedData={(e) => handleVideoLoadedData(selectedImg, e.currentTarget)}
-                                    style={{
-                                        width: '100%',
-                                        maxHeight: '76vh',
-                                        borderRadius: '12px',
-                                        boxShadow: '0 0 28px rgba(0,0,0,0.8)',
-                                        background: '#000',
-                                        objectFit: 'contain'
-                                    }}
-                                />
+                                {resolvedVideoSrc && (
+                                    <video
+                                        key={resolvedVideoSrc}
+                                        ref={playerRef}
+                                        src={resolvedVideoSrc}
+                                        poster={selectedImg.posterUrl || undefined}
+                                        controls
+                                        autoPlay
+                                        playsInline
+                                        preload="auto"
+                                        onCanPlay={() => setIsVideoBuffering(false)}
+                                        onPlaying={() => setIsVideoBuffering(false)}
+                                        onWaiting={() => setIsVideoBuffering(true)}
+                                        onLoadedData={(e) => handleVideoLoadedData(selectedImg, e.currentTarget)}
+                                        style={{
+                                            width: '100%',
+                                            maxHeight: '76vh',
+                                            borderRadius: '12px',
+                                            boxShadow: '0 0 28px rgba(0,0,0,0.8)',
+                                            background: '#000',
+                                            objectFit: 'contain'
+                                        }}
+                                    />
+                                )}
 
-                                {/* Direkt im Player-Modal: Button zum Komprimieren falls noch altes 134-MB-Video */}
+                                {/* Direkt im Player-Modal: Button zum Optimieren falls noch altes unkomprimiertes Video */}
                                 <div style={{
                                     marginTop: '0.75rem',
                                     display: 'flex',
@@ -435,12 +505,12 @@ const Gallery = () => {
                                             {isOptimizingId === selectedImg.id ? (
                                                 <>
                                                     <Loader2 size={15} className="spin-icon" />
-                                                    {statusText || 'Komprimiere...'} ({Math.round(progress)}%)
+                                                    {statusText || 'Optimiere...'} ({Math.round(progress)}%)
                                                 </>
                                             ) : (
                                                 <>
                                                     <Zap size={15} />
-                                                    Video jetzt auf flüssiges HD komprimieren
+                                                    Jetzt auf 1080p Full-HD optimieren
                                                 </>
                                             )}
                                         </button>
@@ -453,7 +523,7 @@ const Gallery = () => {
                                             gap: '5px'
                                         }}>
                                             <CheckCircle2 size={14} />
-                                            HD-Stream optimiert{selectedImg.sizeBytes ? ` (${formatMB(selectedImg.sizeBytes)})` : ''}
+                                            1080p Full-HD Stream{selectedImg.sizeBytes ? ` (${formatMB(selectedImg.sizeBytes)})` : ''}
                                         </span>
                                     )}
                                     <span style={{ color: '#999', fontSize: '0.82rem' }}>
@@ -479,7 +549,7 @@ const Gallery = () => {
                             </>
                         )}
                         <button
-                            onClick={() => setSelectedImg(null)}
+                            onClick={closeModal}
                             style={{
                                 position: 'absolute', top: '-42px', right: 0,
                                 background: 'rgba(255,255,255,0.1)', color: 'white', border: 'none',
