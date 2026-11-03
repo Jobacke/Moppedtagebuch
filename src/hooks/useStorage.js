@@ -42,10 +42,13 @@ export function useStorage() {
                         const url = await getDownloadURL(uploadTask.snapshot.ref);
 
                         // Save reference to Firestore (so we can list it easily)
+                        const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|webm|m4v|3gp|avi|mkv)$/i.test(file.name);
                         await addDoc(collection(db, `users/${currentUser.uid}/photos`), {
                             url,
                             filePath,
                             name: file.name,
+                            mimeType: file.type || (isVideo ? 'video/mp4' : 'image/jpeg'),
+                            mediaType: isVideo ? 'video' : 'image',
                             date: new Date().toISOString()
                         });
 
