@@ -263,7 +263,7 @@ function checkMoppedEmailReplies() {
         <div style="font-family:-apple-system,sans-serif;padding:18px;background:#121212;color:#fff;border-radius:16px;border:1px solid #69BE28;max-width:460px;">
           <h3 style="margin:0 0 8px 0;color:#69BE28;">✅ Direkt im Moppedtagebuch gespeichert!</h3>
           <p style="margin:0 0 14px 0;font-size:15px;line-height:1.5;">\${res.summary}</p>
-          <a href="\${CONFIG.APP_URL}/finance" style="display:inline-block;background:#69BE28;color:#000;padding:10px 16px;border-radius:99px;text-decoration:none;font-weight:700;">Im Moppedtagebuch ansehen →</a>
+          <a href="\${CONFIG.APP_URL}" style="display:inline-block;background:#69BE28;color:#000;padding:10px 16px;border-radius:99px;text-decoration:none;font-weight:700;">Im Moppedtagebuch ansehen →</a>
         </div>
       \`
     });
