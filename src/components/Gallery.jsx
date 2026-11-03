@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Camera, Trash2, X, Plus, Image as ImageIcon, Play, Film, Loader2, Zap, CheckCircle2 } from 'lucide-react';
 import { useCollection } from '../hooks/useFirestore';
 import { useStorage } from '../hooks/useStorage';
-import { getCachedVideoBlob, warmVideoInCache } from '../utils/videoCache';
+import { getCachedVideoBlob } from '../utils/videoCache';
 
 const isVideoItem = (item) => {
     if (!item) return false;
@@ -37,25 +37,6 @@ const Gallery = () => {
     const playerRef = useRef(null);
     const activeObjectUrlRef = useRef(null);
     const posterCapturedForIdRef = useRef(new Set());
-
-    // Beim Öffnen der Galerie: Videos im Hintergrund in den lokalen Geräte-Cache vorladen,
-    // damit sie beim Antippen mit 0 ms Ladezeit direkt aus dem lokalen Speicher starten!
-    useEffect(() => {
-        if (!photos || photos.length === 0) return;
-        const videos = photos.filter((p) => isVideoItem(p) && p.url);
-        let cancelled = false;
-
-        (async () => {
-            for (const v of videos.slice(0, 4)) {
-                if (cancelled) break;
-                await warmVideoInCache(v.url);
-            }
-        })();
-
-        return () => {
-            cancelled = true;
-        };
-    }, [photos]);
 
     // ObjectURL sauber aufräumen, wenn das Modal geschlossen oder gewechselt wird
     useEffect(() => {
@@ -101,9 +82,7 @@ const Gallery = () => {
             setResolvedVideoSrc(localUrl);
             setIsVideoBuffering(false);
         } else {
-            // Sofort per Stream starten und parallel für das nächste Mal lokal cachen
             setResolvedVideoSrc(item.url);
-            warmVideoInCache(item.url);
         }
     };
 
@@ -171,8 +150,8 @@ const Gallery = () => {
         }
     };
 
-    // Ein Video gilt als optimal, wenn es webOptimized ist und <= 58 MB hat (1080p Full-HD @ ~8,5-9,5 Mbit/s)
-    const isTrulyOptimized = (p) => Boolean(p.webOptimized && (!p.sizeBytes || p.sizeBytes < 58 * 1024 * 1024));
+    // Ein Video gilt als optimal, wenn es webOptimized ist und <= 65 MB hat
+    const isTrulyOptimized = (p) => Boolean(p.webOptimized && (!p.sizeBytes || p.sizeBytes < 65 * 1024 * 1024));
     const unoptimizedVideos = (photos || []).filter((p) => isVideoItem(p) && !isTrulyOptimized(p));
 
     return (
@@ -196,7 +175,7 @@ const Gallery = () => {
                 </label>
             </div>
 
-            {/* Hinweis-Banner falls noch ein altes, unkomprimiertes Video (z.B. 134 MB) vorhanden ist */}
+            {/* Hinweis-Banner falls noch ein altes, unkomprimiertes Video (z.B. 231 MB / 87 MB) vorhanden ist */}
             {!isUploading && unoptimizedVideos.length > 0 && (
                 <div
                     className="card fade-in"
@@ -289,8 +268,6 @@ const Gallery = () => {
                     return (
                         <div key={photo.id}
                             className="photo-item"
-                            onMouseEnter={() => isVideo && warmVideoInCache(photo.url)}
-                            onTouchStart={() => isVideo && warmVideoInCache(photo.url)}
                             onClick={() => openItemModal(photo)}
                             style={{
                                 position: 'relative',

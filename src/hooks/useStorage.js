@@ -1,10 +1,94 @@
 import { useState, useRef, useEffect } from 'react';
 import { storage, db } from '../firebase';
-import { ref, uploadBytesResumable, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { ref, uploadBytesResumable, uploadBytes, getDownloadURL, deleteObject, getBlob } from 'firebase/storage';
 import { collection, addDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
 import { useAuth } from '../contexts/AuthContext';
 import { transcodeVideoToWebMp4, generateVideoPosterBlob } from '../utils/videoOptimizer';
-import { cacheVideoBlob, evictVideoFromCache } from '../utils/videoCache';
+import { cacheVideoBlob, getCachedVideoBlob, evictVideoFromCache } from '../utils/videoCache';
+
+/**
+ * Lädt ein bereits in Firebase Storage liegendes Video-Blob herunter.
+ *
+ * WICHTIGER SAFARI-FIX (v1.11) GEGEN "Load failed":
+ * Wenn Safari zuvor ein <video src={url}> ohne CORS-Header geladen hat und der Server
+ * `Cache-Control: immutable` sendet, speichert Safari die Antwort ohne CORS-Header im
+ * Browser-Cache. Ein anschließendes `fetch(url)` auf exakt dieselbe URL schlägt in Safari
+ * sofort mit `TypeError: Load failed` fehl!
+ * Durch das Anhängen von `&_cb=${Date.now()}` umgehen wir den vergifteten Safari-Cache
+ * garantiert und erhalten von `firebasestorage.googleapis.com` frische `Access-Control-Allow-Origin: *` Header,
+ * inklusive Live-Fortschrittsanzeige (MB) per XMLHttpRequest!
+ */
+async function downloadCloudVideoBlob(videoItem, onProgressBytes) {
+    // 1. Prüfen, ob das Video bereits lokal im schnellen Cache liegt
+    const cached = await getCachedVideoBlob(videoItem.url);
+    if (cached && cached.size > 0) {
+        return cached;
+    }
+
+    const bustUrl =
+        videoItem.url +
+        (videoItem.url.includes('?') ? '&' : '?') +
+        '_cb=' +
+        Date.now();
+
+    // 2. Download per XMLHttpRequest mit Cache-Buster & Live-Fortschritt
+    try {
+        const blob = await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('GET', bustUrl, true);
+            xhr.responseType = 'blob';
+
+            xhr.onprogress = (event) => {
+                const total = event.lengthComputable && event.total > 0
+                    ? event.total
+                    : (videoItem.sizeBytes || 0);
+                if (onProgressBytes) {
+                    onProgressBytes(event.loaded, total);
+                }
+            };
+
+            xhr.onload = () => {
+                if (xhr.status >= 200 && xhr.status < 300 && xhr.response) {
+                    resolve(xhr.response);
+                } else {
+                    reject(new Error(`HTTP ${xhr.status}`));
+                }
+            };
+
+            xhr.onerror = () => reject(new Error('XHR Network Error'));
+            xhr.onabort = () => reject(new Error('XHR Aborted'));
+            xhr.send();
+        });
+
+        if (blob && blob.size > 0) {
+            return blob;
+        }
+    } catch (xhrErr) {
+        console.warn('XHR-Download Fallback:', xhrErr);
+    }
+
+    // 3. Fallback per fetch mit cache: 'no-store'
+    try {
+        const res = await fetch(bustUrl, {
+            mode: 'cors',
+            credentials: 'omit',
+            cache: 'no-store'
+        });
+        if (res.ok) {
+            const blob = await res.blob();
+            if (blob && blob.size > 0) return blob;
+        }
+    } catch (fetchErr) {
+        console.warn('Fetch-Download Fallback:', fetchErr);
+    }
+
+    // 4. Fallback über Firebase Storage SDK getBlob
+    if (videoItem.filePath) {
+        return await getBlob(ref(storage, videoItem.filePath));
+    }
+
+    throw new Error('Video konnte nicht aus dem Cloud-Speicher geladen werden.');
+}
 
 export function useStorage() {
     const [progress, setProgress] = useState(0);
@@ -74,7 +158,7 @@ export function useStorage() {
                 generateVideoPosterBlob(rawFile)
             ]);
             file = transcodeResult?.file || rawFile;
-            wasCompressed = Boolean(transcodeResult?.wasCompressed || file.size < 55 * 1024 * 1024);
+            wasCompressed = Boolean(transcodeResult?.wasCompressed || file.size < 60 * 1024 * 1024);
             posterBlob = thumbBlob;
         }
 
@@ -143,7 +227,6 @@ export function useStorage() {
                         ]);
 
                         if (isVideo) {
-                            // Sofort im lokalen Geräte-Cache hinterlegen -> 0 ms Startzeit beim Abspielen!
                             await cacheVideoBlob(url, file);
                         }
 
@@ -177,8 +260,8 @@ export function useStorage() {
     };
 
     /**
-     * Optimiert ein bereits hochgeladenes schweres Video (z.B. 134 MB 4K) nachträglich
-     * auf kristallklares 1080p Full-HD (~8,5 - 9,5 Mbit/s, 50/60fps, FastStart).
+     * Optimiert ein bereits hochgeladenes schweres Video (z.B. 231 MB / 87 MB) nachträglich
+     * auf 1080p Full-HD (~35-42 MB, FastStart).
      */
     const optimizeExistingVideoInCloud = async (videoItem) => {
         if (!currentUser || !videoItem?.id || !videoItem?.url || isUploading) return null;
@@ -187,19 +270,27 @@ export function useStorage() {
             setError(null);
             setIsUploading(true);
             setIsOptimizingId(videoItem.id);
-            setProgress(2);
-            realProgressRef.current = 2;
-            setBytesInfo({ transferred: 0, total: 0 });
+            setProgress(1);
+            realProgressRef.current = 1;
+            setBytesInfo({ transferred: 0, total: videoItem.sizeBytes || 0 });
             setStatusText('Lade Original-Video für 1080p Full-HD Optimierung...');
 
-            const response = await fetch(videoItem.url);
-            const rawBlob = await response.blob();
-            const originalMB = (rawBlob.size / (1024 * 1024)).toFixed(1);
+            const rawBlob = await downloadCloudVideoBlob(videoItem, (loaded, total) => {
+                setBytesInfo({ transferred: loaded, total: total || loaded });
+                if (total > 0) {
+                    const dlPct = Math.min(25, Math.max(1, Math.round((loaded / total) * 25)));
+                    realProgressRef.current = dlPct;
+                    setProgress(dlPct);
+                }
+            });
 
+            const originalMB = (rawBlob.size / (1024 * 1024)).toFixed(1);
+            setBytesInfo({ transferred: 0, total: 0 });
             setStatusText(`Optimiere ${originalMB} MB Video auf 1080p Full-HD...`);
+
             const [transcodeResult, posterBlob] = await Promise.all([
                 transcodeVideoToWebMp4(rawBlob, (pct) => {
-                    const mapped = 10 + Math.round(pct * 0.55);
+                    const mapped = 25 + Math.round(pct * 0.45);
                     realProgressRef.current = mapped;
                     setProgress(mapped);
                 }),
@@ -207,7 +298,6 @@ export function useStorage() {
             ]);
 
             const finalFile = transcodeResult?.file || rawBlob;
-            const wasCompressed = Boolean(transcodeResult?.wasCompressed || finalFile.size < 55 * 1024 * 1024);
             const newMB = (finalFile.size / (1024 * 1024)).toFixed(1);
             setStatusText(`Speichere 1080p Full-HD Video (${newMB} MB statt ${originalMB} MB)...`);
             setBytesInfo({ transferred: 0, total: finalFile.size });
@@ -241,7 +331,7 @@ export function useStorage() {
                     'state_changed',
                     (snap) => {
                         const total = snap.totalBytes || finalFile.size || 1;
-                        const pct = Math.min(99, 65 + (snap.bytesTransferred / total) * 34);
+                        const pct = Math.min(99, 70 + (snap.bytesTransferred / total) * 29);
                         realProgressRef.current = Math.max(realProgressRef.current, pct);
                         setBytesInfo({ transferred: snap.bytesTransferred, total });
                     },
@@ -264,7 +354,7 @@ export function useStorage() {
                             sizeBytes: finalFile.size,
                             mimeType: 'video/mp4',
                             mediaType: 'video',
-                            webOptimized: wasCompressed,
+                            webOptimized: true,
                             qualityProfile: '1080p-hq'
                         };
 

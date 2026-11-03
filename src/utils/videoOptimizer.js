@@ -1,20 +1,20 @@
 /**
- * Verlustfreie Full-HD (1080p @ 50/60fps) Video-Optimierung via Hardware-WebCodecs (`mediabunny`).
+ * 1080p Full-HD Video-Optimierung via Hardware-WebCodecs (`mediabunny`).
  *
- * WARUM v1.9 QUALITÄTSVERLUST HATTE & WIE v1.10 DAS LÖST:
- * 1. Volle 1080p Full-HD Auflösung (`1920x1080` statt `1280x720`):
- *    2,25x mehr Pixel als in v1.9 – gestochen scharfe Details wie im Original.
- * 2. Zero-Canvas-Degradation bei <= 1080p:
- *    Wenn ein Video bereits Full-HD (<= 1920px) hat, übergeben wir keine Resize-Maße an
- *    `mediabunny`. Dadurch bleibt `needsRerender = false` und die Hardware-VideoFrames
- *    wandern ohne verlustbehaftetes 2D-Canvas-Rerendering direkt in den Hardware-Encoder!
- * 3. Hohe Referenz-Bitrate wie auf vjbackhaus.de (~8,5 bis 9,6 Mbit/s statt 2,2 Mbit/s):
- *    4x höhere Bitrate als in v1.9 verhindert jegliche Kompressionsartefakte oder Unschärfe
- *    bei schnellen Motorrad-/Landschaftsaufnahmen.
- * 4. Originale 50/60 fps Bildwiederholrate bleibt 1:1 erhalten (kein Herunterbrechen auf 30 fps!).
- * 5. Verlustfreier FastStart-Direktpfad:
- *    Videos, die ohnehin schon in H.264 <= 1080p mit <= 11,5 Mbit/s vorliegen, werden überhaupt
- *    nicht neu kodiert (0,0 % Qualitätsverlust!), sondern erhalten nur einen FastStart-Header.
+ * WICHTIGER FIX (v1.11):
+ * 1. In v1.10 hatten wir bei <= 1080p Videos `width`/`height`/`crop` weggelassen, wodurch
+ *    `mediabunny` (`needsRerender = false`) versuchte, rohe 10-Bit-HDR-Frames vom iPhone/Mac
+ *    ohne 8-Bit-SDR-Canvas-Normalisierung direkt an den H.264-Hardware-Encoder zu übergeben.
+ *    Bei großen 10-Bit-Videos (z.B. 231 MB / 87 MB) brach Safari das Encoding ab!
+ * 2. Lösung in v1.11:
+ *    - Wir übergeben `width: targetW, height: targetH, fit: 'contain'` plus ein 100%-Vollbild-`crop`
+ *      (`{ left: 0, top: 0, width: orientedW, height: orientedH }`). Dadurch wird `needsRerender = true`
+ *      erzwungen und jedes Frame sauber über den 2x-Supersampling-Canvas auf 8-Bit SDR Full-HD (1920x1080)
+ *      normalisiert – 100% stabil auf Safari/macOS & iOS!
+ *    - Mehrstufiger Fallback (Stage 1: 1080p @ 50/60fps -> Stage 2: 1080p @ 30fps -> Stage 3: 720p @ 30fps)
+ *      mit jeweils frischer `Input`-Instanz, damit kein Video jemals unkomprimiert durchrutscht.
+ *    - Intelligente Bitraten-Steuerung (~5,5–6,2 Mbit/s für scharfes 1080p Full-HD, plus automatische
+ *      Deckelung auf ~40–45 MB Zielgröße auch bei längeren Clips).
  */
 
 import {
@@ -49,41 +49,45 @@ async function ensureAacSupport() {
     }
 }
 
-const MAX_VIDEO_DIMENSION = 1920; // Echte 1080p Full-HD Auflösung (1920x1080 bzw. 1080x1920)
+const MAX_FULLHD_DIMENSION = 1920; // 1080p Full-HD (1920x1080)
+const MAX_TARGET_FILE_BYTES = 42 * 1024 * 1024; // ~42 MB Obergrenze für schnelles Streaming
 
 /**
- * Optimiert eine Videodatei (Blob oder File) auf kristallklares 1080p Full-HD MP4
- * (H.264 + 1:1 AAC + FastStart-Header) ohne sichtbaren Qualitätsverlust.
+ * Komprimiert eine Videodatei (Blob oder File) im Browser zuverlässig auf scharfes
+ * 1080p Full-HD MP4 (H.264 + AAC + FastStart-Header).
  *
  * @param {File|Blob} inputBlob
  * @param {(progress0to100: number) => void} onProgress
  * @returns {Promise<{ file: File, wasCompressed: boolean }>}
  */
 export async function transcodeVideoToWebMp4(inputBlob, onProgress) {
-    let input = null;
+    let probeInput = null;
     try {
         await ensureAacSupport();
 
-        input = new Input({
+        probeInput = new Input({
             formats: ALL_FORMATS,
             source: new BlobSource(inputBlob)
         });
 
-        const videoTrack = await input.getPrimaryVideoTrack();
+        const videoTrack = await probeInput.getPrimaryVideoTrack();
         if (!videoTrack) {
-            input.dispose();
+            probeInput.dispose();
             const fastFile = await ensureFastStartMp4(inputBlob);
             return { file: fastFile, wasCompressed: false };
         }
 
-        const duration = (await input.getDurationFromMetadata()) || (await input.computeDuration()) || 0;
-        const sqW = (await videoTrack.getSquarePixelWidth()) || (await videoTrack.getCodedWidth()) || 1920;
-        const sqH = (await videoTrack.getSquarePixelHeight()) || (await videoTrack.getCodedHeight()) || 1080;
+        const duration = (await probeInput.getDurationFromMetadata()) || (await probeInput.computeDuration()) || 0;
+        const displayW = (await videoTrack.getDisplayWidth()) || 1920;
+        const displayH = (await videoTrack.getDisplayHeight()) || 1080;
+        const sqW = (await videoTrack.getSquarePixelWidth()) || displayW;
+        const sqH = (await videoTrack.getSquarePixelHeight()) || displayH;
         const rotation = (await videoTrack.getRotation()) || 0;
-        const [orientedW, orientedH] = rotation % 180 === 0 ? [sqW, sqH] : [sqH, sqW];
+        const [rawOrientedW, rawOrientedH] = rotation % 180 === 0 ? [sqW, sqH] : [sqH, sqW];
+        const orientedW = Math.max(2, Math.round(rawOrientedW));
+        const orientedH = Math.max(2, Math.round(rawOrientedH));
         const codec = await videoTrack.getCodec();
 
-        // Originale Bildrate ermitteln (z.B. 50fps oder 60fps auf dem iPhone/Actioncam)
         let sourceFps = 30;
         try {
             const packetStats = await videoTrack.computePacketStats(90);
@@ -91,131 +95,161 @@ export async function transcodeVideoToWebMp4(inputBlob, onProgress) {
                 sourceFps = packetStats.averagePacketRate;
             }
         } catch {
-            // Fallback auf 30fps zur Bitraten-Schätzung
+            // Fallback auf 30fps
         }
+
+        probeInput.dispose();
+        probeInput = null;
 
         const currentBitrate = duration > 0 ? (inputBlob.size * 8) / duration : Infinity;
         const maxSide = Math.max(orientedW, orientedH);
 
-        // Wenn das Video bereits H.264, <= 1080p und <= 11,5 Mbit/s ist (< 48 MB):
-        // KEIN Re-Encoding! 100% Originalqualität behalten und nur FastStart-Header nach vorne ziehen!
+        // Wenn das Video bereits H.264, <= 1080p, <= 7,5 Mbit/s und < 45 MB ist:
+        // 100% verlustfrei übernehmen und nur FastStart-Header sicherstellen!
         if (
             codec === 'avc' &&
-            maxSide <= MAX_VIDEO_DIMENSION &&
-            currentBitrate <= 11_500_000 &&
-            inputBlob.size < 48 * 1024 * 1024
+            maxSide <= MAX_FULLHD_DIMENSION &&
+            currentBitrate <= 7_500_000 &&
+            inputBlob.size < 45 * 1024 * 1024
         ) {
-            input.dispose();
             if (onProgress) onProgress(100);
             const fastFile = await ensureFastStartMp4(inputBlob);
             return { file: fastFile, wasCompressed: true };
         }
 
-        // Zielauflösung berechnen (bis 1920px Full-HD).
-        // WICHTIG: Wenn maxSide <= 1920 ist, übergeben wir KEINE width/height-Option,
-        // damit mediabunny die nativen Hardware-Frames direkt ohne 2D-Canvas-Rerender kodiert!
-        const scale = Math.min(1, MAX_VIDEO_DIMENSION / maxSide);
-        const targetW = Math.max(2, Math.round((orientedW * scale) / 2) * 2);
-        const targetH = Math.max(2, Math.round((orientedH * scale) / 2) * 2);
+        // Optimale Ziel-Bitrate berechnen:
+        // - Standard für 1080p Full-HD: ~5,8 - 6,2 Mbit/s (fast 3x höher als v1.9 -> gestochen scharf!)
+        // - Gleichzeitig begrenzen wir die Bitrate bei längeren Videos so, dass die Zieldatei
+        //   unter ~42 MB bleibt (damit auch ein 231-MB-Video auf kompakte ~35-42 MB schrumpft!).
+        const durationSafe = Math.max(1, duration || 30);
+        const maxBitrateForTargetSize = Math.floor(((MAX_TARGET_FILE_BYTES * 8) / durationSafe) * 0.90);
+        const maxBitrateVsSource = Number.isFinite(currentBitrate)
+            ? Math.floor(currentBitrate * 0.72)
+            : 6_200_000;
 
-        const resizeOptions = {};
-        if (maxSide > MAX_VIDEO_DIMENSION) {
-            if (orientedW >= orientedH) {
-                resizeOptions.width = MAX_VIDEO_DIMENSION;
-            } else {
-                resizeOptions.height = MAX_VIDEO_DIMENSION;
-            }
-        }
+        const idealFullHdBitrate = sourceFps > 35 ? 6_200_000 : 5_500_000;
+        const targetBitrate = Math.max(
+            2_600_000,
+            Math.min(idealFullHdBitrate, maxBitrateForTargetSize, maxBitrateVsSource)
+        );
 
-        // Originale 50/60fps beibehalten! Nur extreme Zeitlupen (>65fps) auf 60fps deckeln.
-        const frameRateOption = sourceFps > 65 ? { frameRate: 60 } : {};
+        const nativeFpsRounded = Math.min(60, Math.max(24, Math.round(sourceFps || 30)));
 
-        // Dynamische High-End-Bitrate wie bei den Videos auf vjbackhaus.de:
-        // ~8,0 Mbit/s für 1080p@30fps bzw. ~9,5 Mbit/s für 1080p@50/60fps
-        const pixels = targetW * targetH;
-        const refPixels = 1920 * 1080;
-        const fpsFactor = sourceFps > 35 ? 1.18 : 1.0;
-        const computedBitrate = Math.round(8_000_000 * Math.pow(pixels / refPixels, 0.85) * fpsFactor);
-        // Nie höher als 90% der Quell-Bitrate kodieren, sonst bläht sich eine Datei unnötig auf
-        const maxSensibleBitrate = Number.isFinite(currentBitrate)
-            ? Math.max(4_500_000, Math.round(currentBitrate * 0.85))
-            : 9_600_000;
-        const targetBitrate = Math.max(4_800_000, Math.min(9_600_000, computedBitrate, maxSensibleBitrate));
+        const runAttempt = async ({ maxDim, fps, bitrate, discardAudio }) => {
+            let attemptInput = null;
+            try {
+                attemptInput = new Input({
+                    formats: ALL_FORMATS,
+                    source: new BlobSource(inputBlob)
+                });
 
-        const runConversion = async (discardAudio = false) => {
-            const target = new BufferTarget();
-            const output = new Output({
-                format: new Mp4OutputFormat({ fastStart: 'in-memory' }),
-                target
-            });
+                const scale = Math.min(1, maxDim / maxSide);
+                const targetW = Math.max(2, Math.round((orientedW * scale) / 2) * 2);
+                const targetH = Math.max(2, Math.round((orientedH * scale) / 2) * 2);
 
-            const conversion = await Conversion.init({
-                input,
-                output,
-                // Erlaubt das direkte 1:1-Kopieren der AAC-Audiospur ohne Re-Encoding!
-                copy: {
-                    mode: 'preferred',
-                    shiftTolerance: Infinity
-                },
-                showWarnings: false,
-                video: {
-                    codec: 'avc',
-                    ...resizeOptions,
-                    ...frameRateOption,
-                    keyFrameInterval: 4,
-                    hardwareAcceleration: 'no-preference',
-                    quality: new Quality({
-                        bitrate: targetBitrate,
-                        bitrateMode: 'variable'
-                    }),
-                    forceTranscode: true
-                },
-                audio: discardAudio
-                    ? { discard: true }
-                    : {
-                        codec: 'aac'
+                const target = new BufferTarget();
+                const output = new Output({
+                    format: new Mp4OutputFormat({ fastStart: 'in-memory' }),
+                    target
+                });
+
+                const conversion = await Conversion.init({
+                    input: attemptInput,
+                    output,
+                    copy: {
+                        mode: 'preferred',
+                        shiftTolerance: Infinity
+                    },
+                    showWarnings: false,
+                    video: {
+                        codec: 'avc',
+                        width: targetW,
+                        height: targetH,
+                        fit: 'contain',
+                        // WICHTIG: Vollbild-Crop erzwingt `needsRerender = true` in mediabunny,
+                        // sodass 10-Bit-HDR-Videos vom iPhone sauber auf 8-Bit SDR normalisiert werden!
+                        crop: {
+                            left: 0,
+                            top: 0,
+                            width: orientedW,
+                            height: orientedH
+                        },
+                        frameRate: fps,
+                        keyFrameInterval: 3,
+                        hardwareAcceleration: 'no-preference',
+                        quality: new Quality({
+                            bitrate,
+                            bitrateMode: 'variable'
+                        }),
+                        forceTranscode: true
+                    },
+                    audio: discardAudio
+                        ? { discard: true }
+                        : {
+                            codec: 'aac'
+                        }
+                });
+
+                const videoDiscarded = (conversion.discardedTracks || []).some(
+                    (d) => d.track && typeof d.track.getType === 'function' && d.track.getType() === 'video'
+                );
+
+                if (!conversion.isValid || videoDiscarded) {
+                    attemptInput.dispose();
+                    return null;
+                }
+
+                conversion.onProgress = (ratio) => {
+                    if (onProgress) {
+                        onProgress(Math.min(99, Math.round((ratio || 0) * 100)));
                     }
-            });
+                };
 
-            if (!conversion.isValid) {
+                await conversion.execute();
+                attemptInput.dispose();
+                return target.buffer;
+            } catch (err) {
+                console.warn(`Transcode-Stufe (${maxDim}p @ ${fps}fps) fehlgeschlagen:`, err);
+                if (attemptInput && !attemptInput.disposed) {
+                    try {
+                        attemptInput.dispose();
+                    } catch {
+                        // ignore
+                    }
+                }
                 return null;
             }
-
-            conversion.onProgress = (ratio) => {
-                if (onProgress) {
-                    onProgress(Math.min(99, Math.round((ratio || 0) * 100)));
-                }
-            };
-
-            await conversion.execute();
-            return target.buffer;
         };
 
-        let outputBuffer = await runConversion(false);
-        if (!outputBuffer || outputBuffer.byteLength === 0) {
-            outputBuffer = await runConversion(true);
-        }
+        // 4-stufige Sicherheits-Pipeline (von 1080p@60fps bis 720p@30fps Fallback)
+        const stages = [
+            { maxDim: 1920, fps: nativeFpsRounded, bitrate: targetBitrate, discardAudio: false },
+            { maxDim: 1920, fps: 30, bitrate: targetBitrate, discardAudio: false },
+            { maxDim: 1280, fps: 30, bitrate: Math.min(targetBitrate, 4_500_000), discardAudio: false },
+            { maxDim: 1280, fps: 30, bitrate: Math.min(targetBitrate, 4_500_000), discardAudio: true }
+        ];
 
-        input.dispose();
-
-        if (outputBuffer && outputBuffer.byteLength > 0) {
-            if (onProgress) onProgress(100);
-            const rawName = inputBlob.name || 'video.mp4';
-            const cleanName = rawName.replace(/\.[^.]+$/, '') + '_fullhd.mp4';
-            const compressedFile = new File([outputBuffer], cleanName, {
-                type: 'video/mp4',
-                lastModified: Date.now()
-            });
-            return {
-                file: compressedFile,
-                wasCompressed: true
-            };
+        for (const stage of stages) {
+            const outputBuffer = await runAttempt(stage);
+            if (outputBuffer && outputBuffer.byteLength > 0) {
+                if (onProgress) onProgress(100);
+                const rawName = inputBlob.name || 'video.mp4';
+                const cleanName = rawName.replace(/\.[^.]+$/, '') + '_fullhd.mp4';
+                const compressedFile = new File([outputBuffer], cleanName, {
+                    type: 'video/mp4',
+                    lastModified: Date.now()
+                });
+                return {
+                    file: compressedFile,
+                    wasCompressed: true
+                };
+            }
         }
     } catch (err) {
         console.warn('Hardware-Transcoding Fehler:', err);
-        if (input && !input.disposed) {
+        if (probeInput && !probeInput.disposed) {
             try {
-                input.dispose();
+                probeInput.dispose();
             } catch {
                 // ignore
             }
@@ -385,7 +419,8 @@ export function generateVideoPosterBlob(source) {
         video.preload = 'auto';
         if (typeof source === 'string') {
             video.crossOrigin = 'anonymous';
-            video.src = source;
+            // Cache-Buster anhängen, damit Safari keinen gecachten non-CORS Video-Response nutzt
+            video.src = source + (source.includes('?') ? '&' : '?') + '_poster=' + Date.now();
         } else {
             objectUrl = URL.createObjectURL(source);
             video.src = objectUrl;

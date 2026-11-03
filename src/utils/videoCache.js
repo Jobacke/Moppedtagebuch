@@ -1,18 +1,13 @@
 /**
- * Lokaler High-Speed Video-Cache (CacheStorage API + In-Memory ObjectURLs).
+ * Lokaler High-Speed Video-Cache (CacheStorage API + In-Memory Map).
  *
- * Warum ist das entscheidend für 100% flüssiges Abspielen bei voller 1080p-Qualität?
- * 1. Direkt beim Hochladen (oder Komprimieren) liegt die fertige MP4-Datei ohnehin lokal im RAM.
- *    Wir legen sie sofort unter ihrer Firebase-URL im persistenten Browser-Cache (`CacheStorage`) ab.
- *    Beim Klick auf Play startet das Video in 0 ms direkt aus dem Gerätespeicher – ohne einen
- *    einzigen Byte neu aus dem Internet laden zu müssen!
- * 2. Öffnet man die Galerie auf einem zweiten Gerät (z. B. iPhone), lädt `warmVideoInCache`
- *    die Videos im Hintergrund in den lokalen Cache vor, während man die Galerie betrachtet.
+ * Speichert beim Upload oder bei der Optimierung die fertige MP4-Datei direkt aus dem
+ * Arbeitsspeicher im persistenten Browser-Cache (`CacheStorage`).
+ * Dadurch startet das Video beim Klick auf Play in 0 ms direkt aus dem Gerätespeicher.
  */
 
 const CACHE_NAME = 'mopped-video-cache-v2';
 const memoryBlobMap = new Map();
-const inFlightWarmups = new Map();
 
 function isCacheStorageAvailable() {
     return typeof window !== 'undefined' && 'caches' in window;
@@ -25,7 +20,8 @@ export async function cacheVideoBlob(url, blob) {
     if (!url || !blob) return;
     try {
         memoryBlobMap.set(url, blob);
-        if (!isCacheStorageAvailable()) return;
+        // Nur Videos bis 80 MB im persistenten CacheStorage ablegen, um Safari-Quota-Fehler zu vermeiden
+        if (!isCacheStorageAvailable() || blob.size > 80 * 1024 * 1024) return;
 
         const cache = await window.caches.open(CACHE_NAME);
         const response = new Response(blob, {
@@ -68,40 +64,6 @@ export async function getCachedVideoBlob(url) {
     }
 
     return null;
-}
-
-/**
- * Lädt ein Video im Hintergrund leise in den lokalen Cache vor, damit es beim Antippen
- * sofort mit 0 ms Ladezeit lokal abspielt.
- */
-export function warmVideoInCache(url) {
-    if (!url) return Promise.resolve(null);
-    if (memoryBlobMap.has(url)) return Promise.resolve(memoryBlobMap.get(url));
-    if (inFlightWarmups.has(url)) return inFlightWarmups.get(url);
-
-    const promise = (async () => {
-        try {
-            const existing = await getCachedVideoBlob(url);
-            if (existing) return existing;
-
-            const response = await fetch(url, { mode: 'cors', credentials: 'omit' });
-            if (!response.ok) return null;
-
-            const blob = await response.blob();
-            if (blob && blob.size > 0) {
-                await cacheVideoBlob(url, blob);
-                return blob;
-            }
-        } catch {
-            // Netzwerkfehler im Hintergrund still ignorieren
-        } finally {
-            inFlightWarmups.delete(url);
-        }
-        return null;
-    })();
-
-    inFlightWarmups.set(url, promise);
-    return promise;
 }
 
 /**
