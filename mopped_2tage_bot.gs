@@ -3,11 +3,10 @@
  * 🏍️ MOPPEDTAGEBUCH – 2-TAGE E-MAIL-BOT & ANTWORT-ASSISTENT (iPhone & Mac)
  * ============================================================================
  *
- * WICHTIG:
- * Falls du den Code neu einfügst, kannst du FIREBASE_PASSWORD unten leer lassen,
- * WENN du es beim letzten Mal schon einmal ausgeführt hast (es ist im Google-
- * Skript-Speicher hinterlegt). Sicherheitshalber kannst du es in Zeile 25 aber
- * auch jederzeit wieder eintragen.
+ * WICHTIG ZUM PASSWORT (Zeile 25):
+ * Hier gehört das Login-Passwort deiner Moppedtagebuch-App rein (mit dem du
+ * dich mit backhaus.johannes@gmail.com in der App anmeldest – NICHT GitHub
+ * und NICHT die 4-stellige PIN 3706).
  */
 
 const CONFIG = {
@@ -22,6 +21,7 @@ const CONFIG = {
   FIREBASE_PROJECT_ID: "moppedtagebuch",
   FIREBASE_API_KEY: "AIzaSyCU4b7reiVNHjqvuEM7cXSLGilCmZ5YYlM",
   FIREBASE_EMAIL: "backhaus.johannes@gmail.com",
+  // 👉 HIER das Passwort der Moppedtagebuch-App eintragen:
   FIREBASE_PASSWORD: ""
 };
 
@@ -57,12 +57,12 @@ function setupTwoDayMoppedBot() {
 
   const auth = getFirebaseAuth();
   if (auth) {
-    Logger.log("✅ Firebase-Datenbank verbunden (Account: " + CONFIG.FIREBASE_EMAIL + ", UID: " + auth.uid + ")");
+    Logger.log("✅ Firebase-Datenbank erfolgreich verbunden (UID: " + auth.uid + ")!");
   } else {
-    Logger.log("⚠️ ACHTUNG: Kein FIREBASE_PASSWORD gefunden! Bitte in Zeile 25 eintragen.");
+    Logger.log("⚠️ ACHTUNG: Anmeldung an der Moppedtagebuch-Datenbank noch nicht möglich. Bitte App-Passwort in Zeile 25 prüfen!");
   }
 
-  // Zuerst die allerneueste E-Mail-Antwort auswerten und in Firestore schreiben
+  // Zuerst die allerneueste E-Mail-Antwort auswerten und direkt in Firestore schreiben
   checkMoppedEmailReplies();
 
   // Danach den aktuellen Stand aus Firestore holen und im Protokoll anzeigen
@@ -191,7 +191,6 @@ function checkMoppedEmailReplies() {
 
       if (!firstLine) return;
 
-      // Eigene Bot-Nachrichten sicher ausschließen
       if (
         firstLine.indexOf("🏍️") !== -1 ||
         firstLine.indexOf("✅") !== -1 ||
@@ -226,7 +225,6 @@ function checkMoppedEmailReplies() {
   const lastAppliedId = props.getProperty("LAST_APPLIED_REPLY_ID") || "";
   const liveState = getCurrentBikeState();
 
-  // Prüfen, ob diese neueste Antwort schon verarbeitet wurde UND der KM-Stand in Firestore schon stimmt
   const kmAlreadyInCloud = newest.parsed.km && String(liveState.currentKm) === String(newest.parsed.km);
   if (newest.msgId === lastAppliedId && (kmAlreadyInCloud || !newest.parsed.km)) {
     Logger.log("ℹ️ Neueste Antwort ('" + newest.firstLine + "') ist bereits in der Cloud aktiv (" + liveState.currentKm + " km).");
@@ -235,10 +233,11 @@ function checkMoppedEmailReplies() {
 
   Logger.log("📩 Wende neueste E-Mail-Antwort an: '" + newest.firstLine + "' vom " + newest.msg.getDate());
   const res = applyParsedEntry(newest.parsed, liveState);
-  newest.msg.markRead();
-  props.setProperty("LAST_APPLIED_REPLY_ID", newest.msgId);
 
-  if (res.wroteDirectToFirestore && newest.msgId !== lastAppliedId) {
+  if (res.wroteDirectToFirestore) {
+    newest.msg.markRead();
+    props.setProperty("LAST_APPLIED_REPLY_ID", newest.msgId);
+
     MailApp.sendEmail({
       to: CONFIG.RECIPIENT_EMAIL,
       name: "Mopped-Bot",
@@ -321,11 +320,13 @@ function applyParsedEntry(parsed, currentState) {
   }
 
   const diff = newKm - oldKm;
-  state.currentKm = String(newKm);
-  state.lastUpdated = parsed.date;
-  props.setProperty("BIKE_STATE", JSON.stringify(state));
-
   const wroteDirectToFirestore = writeEntryDirectlyToFirestore(newKm, parsed);
+
+  if (wroteDirectToFirestore) {
+    state.currentKm = String(newKm);
+    state.lastUpdated = parsed.date;
+    props.setProperty("BIKE_STATE", JSON.stringify(state));
+  }
 
   const summary = [];
   if (parsed.km || parsed.addKm) {
@@ -357,7 +358,10 @@ function getCurrentBikeState() {
       const docUrl = `https://firestore.googleapis.com/v1/projects/${CONFIG.FIREBASE_PROJECT_ID}/databases/(default)/documents/users/${authData.uid}/data/technical_data`;
       const res = UrlFetchApp.fetch(docUrl, {
         method: "get",
-        headers: { Authorization: "Bearer " + authData.idToken },
+        headers: {
+          "Authorization": "Bearer " + authData.idToken,
+          "Referer": CONFIG.APP_URL + "/"
+        },
         muteHttpExceptions: true
       });
       if (res.getResponseCode() === 200) {
@@ -395,7 +399,10 @@ function writeEntryDirectlyToFirestore(newKm, parsed) {
     const patchRes = UrlFetchApp.fetch(techUrl, {
       method: "patch",
       contentType: "application/json",
-      headers: { Authorization: "Bearer " + authData.idToken },
+      headers: {
+        "Authorization": "Bearer " + authData.idToken,
+        "Referer": CONFIG.APP_URL + "/"
+      },
       payload: JSON.stringify(techPayload),
       muteHttpExceptions: true
     });
@@ -420,7 +427,10 @@ function writeEntryDirectlyToFirestore(newKm, parsed) {
       UrlFetchApp.fetch(finUrl, {
         method: "post",
         contentType: "application/json",
-        headers: { Authorization: "Bearer " + authData.idToken },
+        headers: {
+          "Authorization": "Bearer " + authData.idToken,
+          "Referer": CONFIG.APP_URL + "/"
+        },
         payload: JSON.stringify(finPayload),
         muteHttpExceptions: true
       });
@@ -442,6 +452,9 @@ function getFirebaseAuth() {
     const res = UrlFetchApp.fetch(url, {
       method: "post",
       contentType: "application/json",
+      headers: {
+        "Referer": CONFIG.APP_URL + "/"
+      },
       payload: JSON.stringify({
         email: CONFIG.FIREBASE_EMAIL,
         password: password,

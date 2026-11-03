@@ -1,10 +1,14 @@
-import React, { useEffect } from 'react';
-import { Settings, DollarSign, Wrench, Package, Zap, CheckCircle2, AlertTriangle } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Settings, DollarSign, Wrench, Package, Zap, CheckCircle2, AlertTriangle, Bot, Check } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useDocument, useCollection } from '../hooks/useFirestore';
+import { useAuth } from '../contexts/AuthContext';
+import { generateBotScriptWithToken } from '../utils/botScriptTemplate';
 
 const Dashboard = ({ onOpenQuickEntry }) => {
     const navigate = useNavigate();
+    const { currentUser } = useAuth();
+    const [copiedBotScript, setCopiedBotScript] = useState(false);
 
     // Fetch data
     const { data: techData, update: updateTechData } = useDocument('technical_data');
@@ -36,6 +40,29 @@ const Dashboard = ({ onOpenQuickEntry }) => {
             });
         }
     }, [bestKmNum, techKmNum, techData, updateTechData]);
+
+    const handleCopyConnectedBotScript = async () => {
+        const refreshToken = currentUser?.refreshToken || currentUser?.stsTokenManager?.refreshToken || '';
+        const uid = currentUser?.uid || '';
+        const email = currentUser?.email || 'backhaus.johannes@gmail.com';
+
+        const scriptText = generateBotScriptWithToken({
+            refreshToken,
+            uid,
+            email,
+            currentKm: totalKm,
+            nextServiceDue: nextService,
+            licensePlate: techData?.licensePlate || 'M-N 594'
+        });
+
+        try {
+            await navigator.clipboard.writeText(scriptText);
+            setCopiedBotScript(true);
+            setTimeout(() => setCopiedBotScript(false), 4000);
+        } catch (err) {
+            alert('Kopieren fehlgeschlagen: ' + err.message);
+        }
+    };
 
     // Calculate generic expenses
     const financeTotal = financeData?.reduce((sum, item) => sum + parseFloat(item.amount || 0), 0) || 0;
@@ -168,6 +195,29 @@ const Dashboard = ({ onOpenQuickEntry }) => {
                     >
                         <Zap size={18} />
                         Schnell-Eintrag (KM & Tanken)
+                    </button>
+
+                    <button
+                        type="button"
+                        onClick={handleCopyConnectedBotScript}
+                        style={{
+                            background: copiedBotScript ? 'rgba(105, 190, 40, 0.25)' : 'rgba(255, 255, 255, 0.07)',
+                            border: '1px solid rgba(105, 190, 40, 0.45)',
+                            color: copiedBotScript ? 'var(--kawasaki-green)' : 'var(--text-primary)',
+                            padding: '9px 14px',
+                            borderRadius: '999px',
+                            fontSize: '0.8rem',
+                            fontWeight: '600',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '6px'
+                        }}
+                    >
+                        {copiedBotScript ? <Check size={15} /> : <Bot size={15} color="var(--kawasaki-green)" />}
+                        {copiedBotScript
+                            ? 'Fertiger Bot-Code (inkl. Schlüssel) kopiert!'
+                            : 'Bot-Code (ohne Passwort) kopieren'}
                     </button>
                 </div>
             </div>
