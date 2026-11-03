@@ -11,9 +11,14 @@ const isVideoItem = (item) => {
     return /\.(mp4|mov|webm|m4v|3gp|avi|mkv)(\?|$)/i.test(target);
 };
 
+const formatMB = (bytes) => {
+    if (!bytes || bytes <= 0) return '0.0 MB';
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
 const Gallery = () => {
     const { data: photos, loading: photosLoading } = useCollection('photos');
-    const { uploadFile, deleteFile, isUploading, progress } = useStorage();
+    const { uploadFile, deleteFile, isUploading, progress, bytesInfo } = useStorage();
     const [selectedImg, setSelectedImg] = useState(null);
 
     const handleFileChange = async (e) => {
@@ -65,9 +70,22 @@ const Gallery = () => {
             {/* Progress Bar */}
             {isUploading && (
                 <div className="card" style={{ marginBottom: '1.5rem', padding: '1rem' }}>
-                    <p style={{ marginBottom: '0.5rem' }}>Lade Datei hoch ({Math.round(progress)}%)...</p>
-                    <div style={{ width: '100%', height: '6px', background: '#333', borderRadius: '3px', overflow: 'hidden' }}>
-                        <div style={{ width: `${progress}%`, height: '100%', background: 'var(--kawasaki-green)', transition: 'width 0.2s' }}></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
+                        <span>Lade Datei hoch ({Math.round(progress)}%)...</span>
+                        {bytesInfo?.total > 0 && (
+                            <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', fontVariantNumeric: 'tabular-nums' }}>
+                                {formatMB(bytesInfo.transferred)} / {formatMB(bytesInfo.total)}
+                            </span>
+                        )}
+                    </div>
+                    <div style={{ width: '100%', height: '8px', background: '#2a2a2a', borderRadius: '99px', overflow: 'hidden' }}>
+                        <div style={{
+                            width: `${progress}%`,
+                            height: '100%',
+                            background: 'linear-gradient(90deg, #52991e, var(--kawasaki-green))',
+                            borderRadius: '99px',
+                            transition: 'width 0.15s linear'
+                        }}></div>
                     </div>
                 </div>
             )}

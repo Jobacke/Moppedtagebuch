@@ -24,7 +24,6 @@ export function useCollection(collectionName) {
     const [data, setData] = useState([]);
     const { currentUser } = useAuth();
     const [loading, setLoading] = useState(true);
-    const [refreshTick, setRefreshTick] = useState(0);
 
     const fetchFreshCollection = useCallback(async () => {
         if (!currentUser) return;
@@ -81,7 +80,6 @@ export function useCollection(collectionName) {
 
         const handleManualRefresh = () => {
             fetchFreshCollection();
-            setRefreshTick(t => t + 1);
         };
 
         document.addEventListener('visibilitychange', handleWakeUp);
@@ -98,7 +96,7 @@ export function useCollection(collectionName) {
             window.removeEventListener('online', fetchFreshCollection);
             window.removeEventListener('mopped-force-refresh', handleManualRefresh);
         };
-    }, [currentUser, collectionName, fetchFreshCollection, refreshTick]);
+    }, [currentUser, collectionName, fetchFreshCollection]);
 
     const add = async (item) => {
         if (!currentUser) return;
@@ -119,7 +117,6 @@ export function useDocument(docName) {
     const [data, setData] = useState(null);
     const { currentUser } = useAuth();
     const [loading, setLoading] = useState(true);
-    const [refreshTick, setRefreshTick] = useState(0);
 
     const fetchFreshDoc = useCallback(async () => {
         if (!currentUser) return;
@@ -176,7 +173,6 @@ export function useDocument(docName) {
 
         const handleManualRefresh = () => {
             fetchFreshDoc();
-            setRefreshTick(t => t + 1);
         };
 
         document.addEventListener('visibilitychange', handleWakeUp);
@@ -193,7 +189,7 @@ export function useDocument(docName) {
             window.removeEventListener('online', fetchFreshDoc);
             window.removeEventListener('mopped-force-refresh', handleManualRefresh);
         };
-    }, [currentUser, docName, fetchFreshDoc, refreshTick]);
+    }, [currentUser, docName, fetchFreshDoc]);
 
     const update = async (newData) => {
         if (!currentUser) return;
