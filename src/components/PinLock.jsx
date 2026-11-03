@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Lock } from 'lucide-react';
+import { Lock, Delete } from 'lucide-react';
 
 const PinLock = ({ onUnlock }) => {
     const [pin, setPin] = useState('');
@@ -109,16 +109,19 @@ const PinLock = ({ onUnlock }) => {
                         width: '70px',
                         height: '70px',
                         borderRadius: '50%',
-                        background: 'transparent',
-                        color: 'var(--text-secondary)',
+                        background: 'rgba(255, 255, 255, 0.1)',
+                        color: 'white',
                         fontSize: '1rem',
                         border: 'none',
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'center'
+                        justifyContent: 'center',
+                        backdropFilter: 'blur(10px)',
+                        cursor: 'pointer',
+                        transition: 'background 0.2s'
                     }}
                 >
-                    DEL
+                    <Delete size={28} />
                 </button>
             </div>
 

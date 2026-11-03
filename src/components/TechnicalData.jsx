@@ -62,7 +62,9 @@ const TechnicalData = () => {
             </div>
 
             <div className="glass-panel" style={{ padding: '1rem' }}>
-                {Object.entries(localData).map(([key, value]) => (
+                {Object.entries(localData)
+                    .filter(([key]) => key !== 'lastUpdatedIso')
+                    .map(([key, value]) => (
                     <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: '1px solid var(--border-color)' }}>
                         <span style={{ color: 'var(--text-secondary)', textTransform: 'capitalize', width: '40%' }}>
                             {key.replace(/([A-Z])/g, ' $1').trim()}

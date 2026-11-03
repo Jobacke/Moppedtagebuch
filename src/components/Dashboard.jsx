@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { Settings, DollarSign, Wrench, Package, Calendar } from 'lucide-react';
+import React from 'react';
+import { Settings, DollarSign, Wrench, Package, Zap, Clock, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useDocument, useCollection } from '../hooks/useFirestore';
 
-const Dashboard = () => {
+const Dashboard = ({ onOpenQuickEntry }) => {
     const navigate = useNavigate();
 
     // Fetch data
@@ -23,14 +23,30 @@ const Dashboard = () => {
 
     const totalExpenses = financeTotal + serviceTotal + accTotal;
 
-    // Determine last ride (or last entry date)
+    // Determine last ride / last entry date (for 2-day reminder rhythm)
     const allDates = [
+        techData?.lastUpdated,
         ...(financeData || []).map(d => d.date),
         ...(serviceData || []).map(d => d.date),
         ...(accessoriesData || []).map(d => d.date)
     ].filter(Boolean).sort().reverse();
 
-    const lastActivity = allDates[0] ? new Date(allDates[0]).toLocaleDateString() : 'N/A';
+    const lastDateRaw = allDates[0] || null;
+    let daysSinceLastUpdate = null;
+    let lastActivityFormatted = 'Noch kein Datum';
+
+    if (lastDateRaw) {
+        const parsed = new Date(lastDateRaw);
+        if (!isNaN(parsed.getTime())) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const entryDay = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+            daysSinceLastUpdate = Math.max(0, Math.round((today - entryDay) / (1000 * 60 * 60 * 24)));
+            lastActivityFormatted = parsed.toLocaleDateString('de-DE');
+        }
+    }
+
+    const isDueForTwoDayCheck = daysSinceLastUpdate === null || daysSinceLastUpdate >= 2;
 
     const cards = [
         { title: 'Technik', icon: <Settings size={32} />, path: '/tech', color: 'rgba(59, 130, 246, 0.2)' },
@@ -45,8 +61,8 @@ const Dashboard = () => {
                 marginTop: '1rem',
                 marginBottom: '2rem',
                 textAlign: 'center',
-                padding: '2rem',
-                background: 'linear-gradient(135deg, rgba(105, 190, 40, 0.1), rgba(0, 0, 0, 0))',
+                padding: '2rem 1.5rem 1.5rem 1.5rem',
+                background: 'linear-gradient(135deg, rgba(105, 190, 40, 0.12), rgba(0, 0, 0, 0))',
                 borderRadius: '24px',
                 border: '1px solid rgba(105, 190, 40, 0.3)'
             }}>
@@ -67,7 +83,7 @@ const Dashboard = () => {
                     flexWrap: 'wrap',
                     gap: '1rem'
                 }}>
-                    <div className="stat-item">
+                    <div className="stat-item" onClick={onOpenQuickEntry} style={{ cursor: 'pointer' }} title="Klicken zum Aktualisieren">
                         <span style={{ display: 'block', fontSize: '1.5rem', fontWeight: 'bold' }}>{totalKm}</span>
                         <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>KM Stand</span>
                     </div>
@@ -79,6 +95,59 @@ const Dashboard = () => {
                         <span style={{ display: 'block', fontSize: '1.5rem', fontWeight: 'bold' }}>€ {totalExpenses.toFixed(0)}</span>
                         <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Gesamtkosten</span>
                     </div>
+                </div>
+
+                {/* 2-Day Check Status & 1-Click Quick Entry Button */}
+                <div style={{
+                    marginTop: '1.5rem',
+                    paddingTop: '1.1rem',
+                    borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.75rem'
+                }}>
+                    <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px',
+                        fontSize: '0.82rem',
+                        color: isDueForTwoDayCheck ? '#fbbf24' : 'var(--kawasaki-green)'
+                    }}>
+                        {isDueForTwoDayCheck ? (
+                            <>
+                                <AlertTriangle size={15} />
+                                <span>
+                                    {daysSinceLastUpdate === null
+                                        ? '2-Tage-Check aktiv: Jetzt ersten Schnell-Check starten'
+                                        : `Letzter Eintrag vor ${daysSinceLastUpdate} Tagen (${lastActivityFormatted}) – KM-Update fällig!`}
+                                </span>
+                            </>
+                        ) : (
+                            <>
+                                <CheckCircle2 size={15} />
+                                <span>
+                                    {daysSinceLastUpdate === 0
+                                        ? 'Heute bereits aktualisiert – gute Fahrt!'
+                                        : `Gestern aktualisiert (${lastActivityFormatted})`}
+                                </span>
+                            </>
+                        )}
+                    </div>
+
+                    <button
+                        type="button"
+                        onClick={onOpenQuickEntry}
+                        className="primary-btn"
+                        style={{
+                            padding: '11px 20px',
+                            fontSize: '0.92rem',
+                            boxShadow: '0 4px 16px rgba(105, 190, 40, 0.25)'
+                        }}
+                    >
+                        <Zap size={18} />
+                        Schnell-Eintrag (KM & Tanken)
+                    </button>
                 </div>
             </div>
 
