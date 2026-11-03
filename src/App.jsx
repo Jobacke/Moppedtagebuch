@@ -135,7 +135,19 @@ function MainLayout({ onLock }) {
   return (
     <div className="app-container fade-in">
       <header style={{ padding: '1rem 1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 style={{ margin: 0, fontSize: '1.2rem', color: 'var(--kawasaki-green)' }}>Moppedtagebuch</h1>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+          <h1 style={{ margin: 0, fontSize: '1.2rem', color: 'var(--kawasaki-green)' }}>Moppedtagebuch</h1>
+          <span style={{
+            fontSize: '0.68rem',
+            color: 'var(--text-secondary)',
+            background: 'rgba(255, 255, 255, 0.06)',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            padding: '1px 6px',
+            borderRadius: '6px',
+            fontWeight: '600',
+            letterSpacing: '0.3px'
+          }}>v1.2</span>
+        </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <button
             onClick={() => setIsQuickModalOpen(true)}
