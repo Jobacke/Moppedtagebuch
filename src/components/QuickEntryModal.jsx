@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Zap, X, Check, Fuel, Gauge, Bot, Copy } from 'lucide-react';
+import { Zap, X, Check, Fuel, Gauge } from 'lucide-react';
 
 const CATEGORIES = [
     { value: 'Fuel', label: '⛽ Tanken' },
@@ -29,8 +29,6 @@ const QuickEntryModal = ({
     const [date, setDate] = useState(() => new Date().toISOString().split('T')[0]);
     const [saving, setSaving] = useState(false);
     const [savedSuccess, setSavedSuccess] = useState(null);
-    const [showBotSetup, setShowBotSetup] = useState(false);
-    const [copiedShortcutUrl, setCopiedShortcutUrl] = useState(false);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -177,7 +175,6 @@ const QuickEntryModal = ({
     if (!isOpen) return null;
 
     const kmDelta = km && currentKmNum > 0 ? parseInt(km, 10) - currentKmNum : 0;
-    const shortcutTemplateUrl = `${window.location.origin}/?quick=1&km={KM}&amount={EURO}&station={TANKSTELLE}&autosave=1`;
 
     return (
         <div
@@ -436,80 +433,10 @@ const QuickEntryModal = ({
                             type="submit"
                             className="primary-btn"
                             disabled={saving}
-                            style={{ marginBottom: '0.8rem' }}
                         >
                             <Zap size={18} />
                             {saving ? 'Speichere...' : 'Jetzt speichern'}
                         </button>
-
-                        {/* Shortcut Info Toggle */}
-                        <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem', marginTop: '0.5rem' }}>
-                            <button
-                                type="button"
-                                onClick={() => setShowBotSetup(!showBotSetup)}
-                                style={{
-                                    background: 'none',
-                                    color: 'var(--text-secondary)',
-                                    fontSize: '0.78rem',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    gap: '6px',
-                                    width: '100%'
-                                }}
-                            >
-                                <Bot size={14} color="var(--kawasaki-green)" />
-                                {showBotSetup ? 'Kurzbefehl-Vorlage ausblenden' : 'Apple Kurzbefehl URL-Vorlage anzeigen'}
-                            </button>
-
-                            {showBotSetup && (
-                                <div className="fade-in" style={{
-                                    marginTop: '0.75rem',
-                                    padding: '0.85rem',
-                                    background: 'rgba(0,0,0,0.35)',
-                                    borderRadius: '12px',
-                                    fontSize: '0.78rem',
-                                    color: 'var(--text-secondary)',
-                                    lineHeight: 1.45
-                                }}>
-                                    <div style={{ fontWeight: '600', color: 'var(--text-primary)', marginBottom: '0.25rem' }}>
-                                        🍏 Direkt-URL für Apple Kurzbefehle (iPhone & Mac):
-                                    </div>
-                                    <div style={{
-                                        background: 'rgba(255,255,255,0.05)',
-                                        padding: '6px 8px',
-                                        borderRadius: '8px',
-                                        wordBreak: 'break-all',
-                                        fontFamily: 'monospace',
-                                        fontSize: '0.7rem',
-                                        marginBottom: '0.4rem'
-                                    }}>
-                                        {shortcutTemplateUrl}
-                                    </div>
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            navigator.clipboard.writeText(shortcutTemplateUrl);
-                                            setCopiedShortcutUrl(true);
-                                            setTimeout(() => setCopiedShortcutUrl(false), 2000);
-                                        }}
-                                        style={{
-                                            background: 'rgba(255,255,255,0.1)',
-                                            color: 'var(--text-primary)',
-                                            padding: '5px 10px',
-                                            borderRadius: '8px',
-                                            fontSize: '0.72rem',
-                                            display: 'inline-flex',
-                                            alignItems: 'center',
-                                            gap: '4px'
-                                        }}
-                                    >
-                                        <Copy size={12} />
-                                        {copiedShortcutUrl ? 'Kopiert!' : 'Vorlage kopieren'}
-                                    </button>
-                                </div>
-                            )}
-                        </div>
                     </form>
                 )}
             </div>
