@@ -14,11 +14,11 @@ export function generateBotScriptWithToken({ refreshToken, uid, email, currentKm
  *
  * Was du einfach als Antwort auf die tägliche Mail schreiben kannst:
  * 1. Nur Tankrechnung (Betrag, Datum, Tankstelle):
- *    z.B. "28,50, 02.11.2026, Aral" oder "31,20 01.11. Shell"
+ *    z.B. "36,48, 19.10. Avia" oder "45,15, 30.08.2026, Shell Himmelkron"
  * 2. Nur neuer KM-Stand:
  *    z.B. "39250" oder "+180"
  * 3. Kombi (KM-Stand + Betrag + Datum + Tankstelle):
- *    z.B. "39250, 28,50, 02.11.2026, Esso"
+ *    z.B. "39250, 36,48, 19.10. Avia"
  *
  * Einfach speichern (Cmd + S) und oben auf "▷ Ausführen" klicken!
  */
@@ -137,8 +137,8 @@ function sendTwoDayMoppedReminder() {
           <div style="font-size:14px;font-weight:700;color:#69BE28;margin-bottom:8px;">💬 Einfach auf diese Mail antworten (1 Zeile genügt):</div>
           <div style="font-size:13px;color:#d0d0d0;line-height:1.6;">
             ⛽ <b>Tankrechnung (Betrag, Datum, Tankstelle):</b><br>
-            • <code style="color:#69BE28;font-weight:700;">28,50, \${dateStr}, Aral</code><br>
-            • <code style="color:#69BE28;font-weight:700;">\${currentKm + 200}, 31,40, \${dateStr}, Shell</code> <i>(inkl. KM-Stand)</i><br><br>
+            • <code style="color:#69BE28;font-weight:700;">36,48, 19.10. Avia</code><br>
+            • <code style="color:#69BE28;font-weight:700;">\${currentKm + 200}, 45,15, \${dateStr}, Shell Himmelkron</code><br><br>
             🛣️ <b>Nur KM-Stand aktualisieren:</b><br>
             • <code style="color:#69BE28;font-weight:700;">\${currentKm + 180}</code> oder <code style="color:#69BE28;font-weight:700;">+180</code>
           </div>
@@ -239,7 +239,7 @@ function checkMoppedEmailReplies() {
   userReplies.sort((a, b) => b.timestamp - a.timestamp);
   const newest = userReplies[0];
 
-  const lastAppliedId = props.getProperty("LAST_APPLIED_REPLY_ID") || "";
+  const lastAppliedId = props.getProperty("LAST_APPLIED_REPLY_ID_V2") || "";
   const liveState = getCurrentBikeState();
 
   const kmAlreadyInCloud = newest.parsed.km && String(liveState.currentKm) === String(newest.parsed.km);
@@ -253,7 +253,7 @@ function checkMoppedEmailReplies() {
 
   if (res.wroteDirectToFirestore) {
     newest.msg.markRead();
-    props.setProperty("LAST_APPLIED_REPLY_ID", newest.msgId);
+    props.setProperty("LAST_APPLIED_REPLY_ID_V2", newest.msgId);
 
     MailApp.sendEmail({
       to: CONFIG.RECIPIENT_EMAIL,
@@ -271,10 +271,11 @@ function checkMoppedEmailReplies() {
 }
 
 /**
- * Parst E-Mail-Antworten flexibel für:
- * - Tankrechnungen: Betrag + Datum + Tankstelle (z.B. "28,50, 02.11.2026, Aral" oder "31.20 01.11. Shell")
- * - KM-Stand: "39250" oder "+180"
- * - Kombination: "39250, 28,50, 02.11.2026, Aral"
+ * Parst E-Mail-Antworten exakt identisch zu den manuellen Finanzen-Einträgen:
+ * - Titel (desc) = Name der Tankstelle (z.B. "Avia", "Shell Himmelkron")
+ * - Datum (date) = Tankdatum im Format YYYY-MM-DD (wird angezeigt als "📅 19.10.2026")
+ * - Kategorie (cat) = "Fuel" (wird angezeigt als "• ⛽ Tanken")
+ * - Betrag (amount) = z.B. "36.48"
  */
 function parseReplyLine(line) {
   let working = line.trim();
@@ -292,9 +293,9 @@ function parseReplyLine(line) {
     dateDisplay: Utilities.formatDate(now, "Europe/Berlin", "dd.MM.yyyy")
   };
 
-  // 1. ZUERST Datum erkennen & aus dem Text schneiden (damit Datum nie mit KM oder Betrag verwechselt wird)
-  // Format DD.MM.YYYY oder DD.MM.YY oder DD.MM.
-  const deDateMatch = working.match(/\\b(\\d{1,2})\\.(\\d{1,2})\\.(?:(\\d{2,4}))?\\b/);
+  // 1. ZUERST Datum erkennen (z.B. "19.10.", "19.10.26", "19.10.2026" oder "2026-10-19")
+  // Wichtig: Kein \\b nach dem zweiten Punkt, damit auch "19.10. Avia" ohne Jahreszahl erkannt wird!
+  const deDateMatch = working.match(/\\b(\\d{1,2})\\.(\\d{1,2})\\.(\\d{2,4})?/);
   const isoDateMatch = !deDateMatch && working.match(/\\b(\\d{4})-(\\d{1,2})-(\\d{1,2})\\b/);
 
   if (deDateMatch) {
@@ -345,7 +346,7 @@ function parseReplyLine(line) {
     }
   }
 
-  // 4. Betrag in Euro erkennen (z.B. "28,50", "28.50", "28,50 €", "30€")
+  // 4. Betrag in Euro erkennen (z.B. "36,48", "36.48", "36,48 €", "30€")
   const amountMatch = working.match(/(?:^|[\\s,;])(\\d{1,3}(?:[.,]\\d{1,2})?|\\d{1,4}[.,]\\d{1,2})\\s*(?:€|eur|euro)?(?=$|[\\s,;])/i);
   if (amountMatch) {
     const val = parseFloat(amountMatch[1].replace(",", "."));
@@ -355,7 +356,7 @@ function parseReplyLine(line) {
     }
   }
 
-  // 5. Übriger Text = Tankstelle / Beschreibung
+  // 5. Übriger Text = Name der Tankstelle (exakt wie bei manuellen Einträgen, z.B. "Avia" oder "Shell Himmelkron")
   let leftover = working
     .replace(/\\b(km|euro|eur|€)\\b/gi, " ")
     .replace(/^[,;\\s\\-]+|[,;\\s\\-]+$/g, "")
@@ -363,7 +364,6 @@ function parseReplyLine(line) {
     .replace(/\\s{2,}/g, " ")
     .trim();
 
-  // Falls "Tanken bei Aral" o.ä. geschrieben wurde, bereinigen
   leftover = leftover.replace(/^(tanken|getankt)\\s*(bei|an der|in)?\\s*/i, "").trim();
 
   if (leftover) {
@@ -371,9 +371,7 @@ function parseReplyLine(line) {
   }
 
   if (result.amount) {
-    result.desc = result.station
-      ? \`⛽ Tanken • \${result.station}\`
-      : "⛽ Tanken";
+    result.desc = result.station || "Tanken";
   }
 
   return result;
@@ -407,7 +405,7 @@ function applyParsedEntry(parsed, currentState) {
   }
   if (parsed.amount) {
     summary.push(
-      \`Tankrechnung: € \${parsed.amount.toFixed(2)} • Datum: \${parsed.dateDisplay}\${parsed.station ? \` • Tankstelle: \${parsed.station}\` : ""}\`
+      \`\${parsed.desc}: € \${parsed.amount.toFixed(2)} am \${parsed.dateDisplay}\`
     );
   }
   return {
@@ -489,18 +487,16 @@ function writeEntryDirectlyToFirestore(newKm, parsed, hasKmChange) {
 
     if (parsed.amount && parsed.amount > 0) {
       const finUrl = \`\${baseUrl}/finance\`;
-      const descText = parsed.station
-        ? \`⛽ Tanken • \${parsed.station}\${hasKmChange ? \` (\${newKm} km)\` : ""}\`
-        : \`⛽ Tanken\${hasKmChange ? \` (\${newKm} km)\` : ""}\`;
+      // Exakt identische Feldstruktur wie bei manuellen Einträgen in Finance.jsx:
+      // desc = Name der Tankstelle (z.B. "Avia"), date = "2026-10-19", cat = "Fuel", amount = "36.48"
+      const descText = parsed.station || "Tanken";
 
       const finPayload = {
         fields: {
           date: { stringValue: parsed.date },
           desc: { stringValue: descText },
-          station: { stringValue: parsed.station || "" },
           amount: { stringValue: parsed.amount.toFixed(2) },
-          cat: { stringValue: parsed.cat || "Fuel" },
-          km: { stringValue: hasKmChange ? String(newKm) : "" }
+          cat: { stringValue: parsed.cat || "Fuel" }
         }
       };
       const finRes = UrlFetchApp.fetch(finUrl, {
@@ -514,7 +510,7 @@ function writeEntryDirectlyToFirestore(newKm, parsed, hasKmChange) {
         muteHttpExceptions: true
       });
       if (finRes.getResponseCode() === 200) {
-        Logger.log("✅ Tankrechnung erfolgreich in Finanzen gespeichert: € " + parsed.amount.toFixed(2) + " (" + descText + ", " + parsed.date + ")");
+        Logger.log("✅ Tankrechnung gespeichert: " + descText + " | 📅 " + parsed.dateDisplay + " | € " + parsed.amount.toFixed(2));
       }
     }
     return true;

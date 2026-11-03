@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, Fuel } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { useCollection } from '../hooks/useFirestore';
 
 const CATEGORY_LABELS = {
@@ -22,7 +22,6 @@ const Finance = () => {
     const { data: expenses, add, remove, loading } = useCollection('finance');
     const [newExpense, setNewExpense] = useState(() => ({
         date: new Date().toISOString().split('T')[0],
-        station: '',
         desc: '',
         amount: '',
         cat: 'Fuel'
@@ -32,27 +31,17 @@ const Finance = () => {
     const handleAdd = async (e) => {
         e.preventDefault();
         const cleanAmount = String(newExpense.amount || '').replace(',', '.');
-        if (!cleanAmount) return;
-
-        const isFuel = newExpense.cat === 'Fuel';
-        const stationName = (newExpense.station || '').trim();
-        const customDesc = (newExpense.desc || '').trim();
-
-        const finalDesc = isFuel
-            ? (stationName ? `⛽ Tanken • ${stationName}${customDesc ? ` (${customDesc})` : ''}` : (customDesc || '⛽ Tanken'))
-            : (customDesc || CATEGORY_LABELS[newExpense.cat] || 'Ausgabe');
+        if (!cleanAmount || !newExpense.desc) return;
 
         await add({
             date: newExpense.date || new Date().toISOString().split('T')[0],
-            station: stationName,
-            desc: finalDesc,
+            desc: newExpense.desc.trim(),
             amount: parseFloat(cleanAmount).toFixed(2),
             cat: newExpense.cat
         });
 
         setNewExpense({
             date: new Date().toISOString().split('T')[0],
-            station: '',
             desc: '',
             amount: '',
             cat: 'Fuel'
@@ -73,34 +62,18 @@ const Finance = () => {
     return (
         <div className="section-container fade-in">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-                <h2 className="section-title">Finanzen & Tanken</h2>
+                <h2 className="section-title">Finanzen</h2>
                 <div style={{ background: 'rgba(105, 190, 40, 0.2)', padding: '8px 16px', borderRadius: '12px' }}>
                     <span style={{ color: 'var(--kawasaki-green)', fontWeight: 'bold' }}>€ {total.toFixed(2)}</span>
                 </div>
             </div>
 
             <button className="primary-btn" onClick={() => setShowForm(!showForm)} style={{ marginBottom: '1.5rem' }}>
-                <Plus size={20} /> Neue Tankrechnung / Ausgabe
+                <Plus size={20} /> Neuer Eintrag
             </button>
 
             {showForm && (
                 <form onSubmit={handleAdd} className="glass-panel fade-in" style={{ marginBottom: '1.5rem' }}>
-                    <select
-                        className="input-field"
-                        value={newExpense.cat}
-                        onChange={e => setNewExpense({ ...newExpense, cat: e.target.value })}
-                    >
-                        <option value="Fuel">⛽ Tanken</option>
-                        <option value="Service">🔧 Wartung</option>
-                        <option value="Insurance">🛡️ Versicherung</option>
-                        <option value="Tax">🏛️ Steuer</option>
-                        <option value="Parts">🔩 Teile</option>
-                        <option value="Other">📦 Sonstiges</option>
-                    </select>
-
-                    <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                        Datum des Tankens / Belegs
-                    </label>
                     <input
                         type="date"
                         className="input-field"
@@ -108,46 +81,36 @@ const Finance = () => {
                         onChange={e => setNewExpense({ ...newExpense, date: e.target.value })}
                         required
                     />
-
-                    {newExpense.cat === 'Fuel' && (
-                        <>
-                            <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                                Tankstelle
-                            </label>
-                            <input
-                                type="text"
-                                placeholder="z. B. Aral, Shell, Esso, Jet..."
-                                className="input-field"
-                                value={newExpense.station}
-                                onChange={e => setNewExpense({ ...newExpense, station: e.target.value })}
-                                required
-                            />
-                        </>
-                    )}
-
-                    <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                        Betrag (€)
-                    </label>
+                    <input
+                        type="text"
+                        placeholder={newExpense.cat === 'Fuel' ? 'Tankstelle (z. B. Shell Himmelkron)' : 'Beschreibung'}
+                        className="input-field"
+                        value={newExpense.desc}
+                        onChange={e => setNewExpense({ ...newExpense, desc: e.target.value })}
+                        required
+                    />
+                    <select
+                        className="input-field"
+                        value={newExpense.cat}
+                        onChange={e => setNewExpense({ ...newExpense, cat: e.target.value })}
+                    >
+                        <option value="Fuel">Tanken</option>
+                        <option value="Service">Wartung</option>
+                        <option value="Insurance">Versicherung</option>
+                        <option value="Tax">Steuer</option>
+                        <option value="Parts">Teile</option>
+                        <option value="Other">Sonstiges</option>
+                    </select>
                     <input
                         type="number"
                         inputMode="decimal"
-                        placeholder="z. B. 28.50"
+                        placeholder="Betrag (€)"
                         className="input-field"
                         value={newExpense.amount}
                         onChange={e => setNewExpense({ ...newExpense, amount: e.target.value })}
                         step="0.01"
                         required
                     />
-
-                    <input
-                        type="text"
-                        placeholder={newExpense.cat === 'Fuel' ? 'Notiz (optional)' : 'Beschreibung'}
-                        className="input-field"
-                        value={newExpense.desc}
-                        onChange={e => setNewExpense({ ...newExpense, desc: e.target.value })}
-                        required={newExpense.cat !== 'Fuel'}
-                    />
-
                     <button type="submit" className="primary-btn">Speichern</button>
                 </form>
             )}
@@ -163,10 +126,7 @@ const Finance = () => {
                                     {ex.desc}
                                 </div>
                                 <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-                                    📅 {formatDeDate(ex.date)}
-                                    {ex.station ? ` • ⛽ ${ex.station}` : ''}
-                                    {ex.km ? ` • 🛣️ ${ex.km} km` : ''}
-                                    {!ex.station ? ` • ${CATEGORY_LABELS[ex.cat] || ex.cat}` : ''}
+                                    📅 {formatDeDate(ex.date)} • {CATEGORY_LABELS[ex.cat] || ex.cat}
                                 </div>
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>

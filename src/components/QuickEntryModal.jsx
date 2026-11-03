@@ -117,20 +117,16 @@ const QuickEntryModal = ({
                 let finalDesc = '';
 
                 if (isFuel) {
-                    finalDesc = cleanStation
-                        ? `⛽ Tanken • ${cleanStation}${targetDesc.trim() ? ` (${targetDesc.trim()})` : ''}`
-                        : (targetDesc.trim() || `⛽ Tanken${cleanKm ? ` (${cleanKm} km)` : ''}`);
+                    finalDesc = cleanStation || targetDesc.trim() || 'Tanken';
                 } else {
-                    finalDesc = targetDesc.trim() || `${categoryLabel}${cleanKm ? ` (${cleanKm} km)` : ''}`;
+                    finalDesc = targetDesc.trim() || categoryLabel;
                 }
 
                 await addFinanceEntry({
                     date: targetDate,
-                    station: cleanStation,
                     desc: finalDesc,
                     amount: numericAmount.toFixed(2),
-                    cat: targetCat,
-                    km: cleanKm || String(currentKmNum || '')
+                    cat: targetCat
                 });
 
                 await updateTechData({
@@ -140,7 +136,7 @@ const QuickEntryModal = ({
                     lastUpdatedIso: new Date().toISOString()
                 });
 
-                summaryParts.push(`€ ${numericAmount.toFixed(2)} (${cleanStation || categoryLabel} am ${targetDate})`);
+                summaryParts.push(`€ ${numericAmount.toFixed(2)} (${finalDesc} am ${targetDate})`);
             }
 
             setSavedSuccess(summaryParts.join(' • ') || 'Eintrag gespeichert!');
