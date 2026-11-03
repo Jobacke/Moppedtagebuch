@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Zap, X, Check, Fuel, Gauge, Wrench, Package, Plus, Send, Bot, ExternalLink, Copy, Key } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext';
+import { Zap, X, Check, Fuel, Gauge, Bot, Copy } from 'lucide-react';
 
 const CATEGORIES = [
     { value: 'Fuel', label: '⛽ Tanken' },
@@ -24,18 +23,15 @@ const QuickEntryModal = ({
 
     const [km, setKm] = useState('');
     const [amount, setAmount] = useState('');
+    const [station, setStation] = useState('');
     const [cat, setCat] = useState('Fuel');
     const [desc, setDesc] = useState('');
     const [date, setDate] = useState(() => new Date().toISOString().split('T')[0]);
     const [saving, setSaving] = useState(false);
     const [savedSuccess, setSavedSuccess] = useState(null);
     const [showBotSetup, setShowBotSetup] = useState(false);
-    const [botWebhookUrl, setBotWebhookUrl] = useState(
-        () => localStorage.getItem('mopped_bot_webhook_url') || ''
-    );
     const [copiedShortcutUrl, setCopiedShortcutUrl] = useState(false);
 
-    // Pre-fill from current techData or URL parameters
     useEffect(() => {
         if (!isOpen) return;
 
@@ -53,6 +49,9 @@ const QuickEntryModal = ({
         if (initialParams.amount) {
             setAmount(String(initialParams.amount).replace(',', '.'));
         }
+        if (initialParams.station) {
+            setStation(initialParams.station);
+        }
         if (initialParams.cat) {
             setCat(initialParams.cat);
         }
@@ -64,7 +63,7 @@ const QuickEntryModal = ({
     // Handle autosave from 1-click email button or Apple Shortcut
     useEffect(() => {
         if (!isOpen || !initialParams.autosave || saving || savedSuccess) return;
-        if (!techData && initialParams.addKm) return; // Wait until techData is loaded for relative addKm
+        if (!techData && initialParams.addKm) return;
 
         const targetKm = initialParams.km
             ? parseInt(initialParams.km, 10)
@@ -80,6 +79,7 @@ const QuickEntryModal = ({
             executeSave({
                 targetKm: targetKm ? String(targetKm) : String(currentKmNum || ''),
                 targetAmount: targetAmount ? String(targetAmount) : '',
+                targetStation: initialParams.station || '',
                 targetCat: initialParams.cat || 'Fuel',
                 targetDesc: initialParams.desc || '',
                 targetDate: initialParams.date || new Date().toISOString().split('T')[0]
@@ -87,33 +87,13 @@ const QuickEntryModal = ({
         }
     }, [isOpen, initialParams, techData, currentKmNum]);
 
-    const syncToBotWebhook = async (newKm, lastUpdatedDate) => {
-        const url = localStorage.getItem('mopped_bot_webhook_url');
-        if (!url) return;
-        try {
-            await fetch(url, {
-                method: 'POST',
-                mode: 'no-cors',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'syncState',
-                    currentKm: newKm,
-                    nextServiceDue: techData?.nextServiceDue || '52000',
-                    licensePlate: techData?.licensePlate || 'M-N 594',
-                    lastUpdated: lastUpdatedDate
-                })
-            });
-        } catch (err) {
-            console.warn('Bot webhook sync hint:', err);
-        }
-    };
-
-    const executeSave = async ({ targetKm, targetAmount, targetCat, targetDesc, targetDate }) => {
+    const executeSave = async ({ targetKm, targetAmount, targetStation, targetCat, targetDesc, targetDate }) => {
         setSaving(true);
         try {
             const cleanKm = String(targetKm || '').trim();
             const cleanAmount = String(targetAmount || '').replace(',', '.').trim();
             const numericAmount = parseFloat(cleanAmount);
+            const cleanStation = String(targetStation || '').trim();
             const summaryParts = [];
 
             if (cleanKm && (!currentKmNum || parseInt(cleanKm, 10) !== currentKmNum || !numericAmount)) {
@@ -132,18 +112,27 @@ const QuickEntryModal = ({
             }
 
             if (!isNaN(numericAmount) && numericAmount > 0) {
+                const isFuel = targetCat === 'Fuel';
                 const categoryLabel = CATEGORIES.find(c => c.value === targetCat)?.label.replace(/^[^\s]+\s/, '') || 'Tanken';
-                const finalDesc = targetDesc.trim() || `${categoryLabel}${cleanKm ? ` (${cleanKm} km)` : ''}`;
+                let finalDesc = '';
+
+                if (isFuel) {
+                    finalDesc = cleanStation
+                        ? `⛽ Tanken • ${cleanStation}${targetDesc.trim() ? ` (${targetDesc.trim()})` : ''}`
+                        : (targetDesc.trim() || `⛽ Tanken${cleanKm ? ` (${cleanKm} km)` : ''}`);
+                } else {
+                    finalDesc = targetDesc.trim() || `${categoryLabel}${cleanKm ? ` (${cleanKm} km)` : ''}`;
+                }
 
                 await addFinanceEntry({
                     date: targetDate,
+                    station: cleanStation,
                     desc: finalDesc,
                     amount: numericAmount.toFixed(2),
                     cat: targetCat,
                     km: cleanKm || String(currentKmNum || '')
                 });
 
-                // Also update lastUpdated on technical_data so the 2-day reminder knows an entry was made
                 await updateTechData({
                     ...(techData || {}),
                     ...(cleanKm ? { currentKm: cleanKm } : {}),
@@ -151,10 +140,8 @@ const QuickEntryModal = ({
                     lastUpdatedIso: new Date().toISOString()
                 });
 
-                summaryParts.push(`€ ${numericAmount.toFixed(2)} (${finalDesc})`);
+                summaryParts.push(`€ ${numericAmount.toFixed(2)} (${cleanStation || categoryLabel} am ${targetDate})`);
             }
-
-            await syncToBotWebhook(cleanKm || String(currentKmNum || ''), targetDate);
 
             setSavedSuccess(summaryParts.join(' • ') || 'Eintrag gespeichert!');
             if (onClearParams) onClearParams();
@@ -162,6 +149,7 @@ const QuickEntryModal = ({
             setTimeout(() => {
                 setSavedSuccess(null);
                 setAmount('');
+                setStation('');
                 setDesc('');
                 onClose();
             }, 1600);
@@ -178,6 +166,7 @@ const QuickEntryModal = ({
         await executeSave({
             targetKm: km,
             targetAmount: amount,
+            targetStation: station,
             targetCat: cat,
             targetDesc: desc,
             targetDate: date
@@ -189,15 +178,10 @@ const QuickEntryModal = ({
         setKm(String(base + inc));
     };
 
-    const handleSaveWebhook = () => {
-        localStorage.setItem('mopped_bot_webhook_url', botWebhookUrl.trim());
-        setShowBotSetup(false);
-    };
-
     if (!isOpen) return null;
 
     const kmDelta = km && currentKmNum > 0 ? parseInt(km, 10) - currentKmNum : 0;
-    const shortcutTemplateUrl = `${window.location.origin}/?quick=1&km={KM}&amount={EURO}&autosave=1`;
+    const shortcutTemplateUrl = `${window.location.origin}/?quick=1&km={KM}&amount={EURO}&station={TANKSTELLE}&autosave=1`;
 
     return (
         <div
@@ -243,7 +227,7 @@ const QuickEntryModal = ({
                         </div>
                         <div>
                             <h3 style={{ margin: 0, fontSize: '1.2rem', color: 'var(--text-primary)' }}>
-                                1-Klick Schnelleingabe
+                                KM & Tankrechnung
                             </h3>
                             <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
                                 Versys 1000 SE • Aktuell {currentKmNum || '---'} km
@@ -376,7 +360,7 @@ const QuickEntryModal = ({
                             </div>
                         </div>
 
-                        {/* Optional Fuel / Expense Section */}
+                        {/* Tankrechnung / Expense Section */}
                         <div style={{
                             padding: '1rem',
                             background: 'rgba(0, 0, 0, 0.25)',
@@ -385,7 +369,7 @@ const QuickEntryModal = ({
                             marginBottom: '1.2rem'
                         }}>
                             <label style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '0.6rem' }}>
-                                <Fuel size={15} color="var(--kawasaki-green)" /> Direkt Tanken / Kosten miterfassen (optional)
+                                <Fuel size={15} color="var(--kawasaki-green)" /> Tankrechnung / Ausgabe erfassen (optional)
                             </label>
 
                             <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
@@ -410,37 +394,46 @@ const QuickEntryModal = ({
                                 ))}
                             </div>
 
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.3fr', gap: '0.6rem' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.3fr', gap: '0.6rem', marginBottom: '0.6rem' }}>
                                 <input
                                     type="number"
                                     inputMode="decimal"
                                     step="0.01"
-                                    placeholder="Betrag €"
+                                    placeholder="Betrag (€)"
                                     className="input-field"
                                     value={amount}
                                     onChange={(e) => setAmount(e.target.value)}
                                     style={{ marginBottom: 0 }}
                                 />
                                 <input
+                                    type="date"
+                                    className="input-field"
+                                    value={date}
+                                    onChange={(e) => setDate(e.target.value)}
+                                    style={{ marginBottom: 0 }}
+                                    title="Datum des Tankens"
+                                />
+                            </div>
+
+                            {cat === 'Fuel' ? (
+                                <input
                                     type="text"
-                                    placeholder="Notiz (optional)"
+                                    placeholder="Tankstelle (z. B. Aral, Shell, Esso...)"
+                                    className="input-field"
+                                    value={station}
+                                    onChange={(e) => setStation(e.target.value)}
+                                    style={{ marginBottom: 0 }}
+                                />
+                            ) : (
+                                <input
+                                    type="text"
+                                    placeholder="Beschreibung / Notiz"
                                     className="input-field"
                                     value={desc}
                                     onChange={(e) => setDesc(e.target.value)}
                                     style={{ marginBottom: 0 }}
                                 />
-                            </div>
-                        </div>
-
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                            <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Datum:</span>
-                            <input
-                                type="date"
-                                className="input-field"
-                                value={date}
-                                onChange={(e) => setDate(e.target.value)}
-                                style={{ width: 'auto', marginBottom: 0, padding: '6px 10px', fontSize: '0.85rem' }}
-                            />
+                            )}
                         </div>
 
                         <button
@@ -453,7 +446,7 @@ const QuickEntryModal = ({
                             {saving ? 'Speichere...' : 'Jetzt speichern'}
                         </button>
 
-                        {/* Bot & Shortcut Info Toggle */}
+                        {/* Shortcut Info Toggle */}
                         <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem', marginTop: '0.5rem' }}>
                             <button
                                 type="button"
@@ -470,7 +463,7 @@ const QuickEntryModal = ({
                                 }}
                             >
                                 <Bot size={14} color="var(--kawasaki-green)" />
-                                {showBotSetup ? 'Bot- & Kurzbefehl-Einstellungen ausblenden' : '2-Tage-Bot & Apple Kurzbefehl Kopplung'}
+                                {showBotSetup ? 'Kurzbefehl-Vorlage ausblenden' : 'Apple Kurzbefehl URL-Vorlage anzeigen'}
                             </button>
 
                             {showBotSetup && (
@@ -483,34 +476,6 @@ const QuickEntryModal = ({
                                     color: 'var(--text-secondary)',
                                     lineHeight: 1.45
                                 }}>
-                                    <div style={{ fontWeight: '600', color: 'var(--text-primary)', marginBottom: '0.35rem' }}>
-                                        🤖 Google Apps Script 2-Tage-Bot URL (optional):
-                                    </div>
-                                    <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.75rem' }}>
-                                        <input
-                                            type="url"
-                                            placeholder="https://script.google.com/macros/s/.../exec"
-                                            className="input-field"
-                                            value={botWebhookUrl}
-                                            onChange={(e) => setBotWebhookUrl(e.target.value)}
-                                            style={{ marginBottom: 0, fontSize: '0.75rem', padding: '8px' }}
-                                        />
-                                        <button
-                                            type="button"
-                                            onClick={handleSaveWebhook}
-                                            style={{
-                                                background: 'var(--kawasaki-green)',
-                                                color: '#000',
-                                                borderRadius: '8px',
-                                                padding: '0 12px',
-                                                fontWeight: '700',
-                                                fontSize: '0.75rem'
-                                            }}
-                                        >
-                                            OK
-                                        </button>
-                                    </div>
-
                                     <div style={{ fontWeight: '600', color: 'var(--text-primary)', marginBottom: '0.25rem' }}>
                                         🍏 Direkt-URL für Apple Kurzbefehle (iPhone & Mac):
                                     </div>

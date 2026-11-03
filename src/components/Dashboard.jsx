@@ -94,7 +94,7 @@ const Dashboard = ({ onOpenQuickEntry }) => {
         }
     }
 
-    const isDueForTwoDayCheck = daysSinceLastUpdate === null || daysSinceLastUpdate >= 2;
+    const isDueForTwoDayCheck = daysSinceLastUpdate === null || daysSinceLastUpdate >= 1;
 
     const cards = [
         { title: 'Technik', icon: <Settings size={32} />, path: '/tech', color: 'rgba(59, 130, 246, 0.2)' },

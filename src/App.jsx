@@ -30,6 +30,7 @@ function parseQuickUrlParams() {
     km: params.get('km') || '',
     addKm: params.get('addKm') || '',
     amount: params.get('amount') || '',
+    station: params.get('station') || '',
     cat: params.get('cat') || 'Fuel',
     desc: params.get('desc') || '',
     date: params.get('date') || '',

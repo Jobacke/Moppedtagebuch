@@ -8,11 +8,17 @@ export function generateBotScriptWithToken({ refreshToken, uid, email, currentKm
 
   return `/**
  * ============================================================================
- * 🏍️ MOPPEDTAGEBUCH – 2-TAGE E-MAIL-BOT & ANTWORT-ASSISTENT (iPhone & Mac)
+ * 🏍️ MOPPEDTAGEBUCH – TÄGLICHER E-MAIL-BOT & TANKRECHNUNGS-ASSISTENT
  * ============================================================================
  * ✅ AUTOMATISCH MIT DEINEM MOPPEDTAGEBUCH-ACCOUNT VERKNÜPFT!
- * Du brauchst KEIN Passwort einzutragen – dein persönlicher Zugangsschlüssel
- * (Refresh-Token) ist unten bereits fertig hinterlegt.
+ *
+ * Was du einfach als Antwort auf die tägliche Mail schreiben kannst:
+ * 1. Nur Tankrechnung (Betrag, Datum, Tankstelle):
+ *    z.B. "28,50, 02.11.2026, Aral" oder "31,20 01.11. Shell"
+ * 2. Nur neuer KM-Stand:
+ *    z.B. "39250" oder "+180"
+ * 3. Kombi (KM-Stand + Betrag + Datum + Tankstelle):
+ *    z.B. "39250, 28,50, 02.11.2026, Esso"
  *
  * Einfach speichern (Cmd + S) und oben auf "▷ Ausführen" klicken!
  */
@@ -24,7 +30,7 @@ const CONFIG = {
   LICENSE_PLATE: "${safePlate}",
   DEFAULT_KM: ${safeKm},
   DEFAULT_NEXT_SERVICE: ${safeService},
-  REMINDER_HOUR: 19, // 19:00 Uhr abends alle 2 Tage
+  REMINDER_HOUR: 19, // Täglich um 19:00 Uhr abends
 
   FIREBASE_PROJECT_ID: "moppedtagebuch",
   FIREBASE_API_KEY: "AIzaSyCU4b7reiVNHjqvuEM7cXSLGilCmZ5YYlM",
@@ -47,15 +53,15 @@ function setupTwoDayMoppedBot() {
   const triggers = ScriptApp.getProjectTriggers();
   triggers.forEach(t => {
     const fn = t.getHandlerFunction();
-    if (fn === "sendTwoDayMoppedReminder" || fn === "checkMoppedEmailReplies") {
+    if (fn === "sendTwoDayMoppedReminder" || fn === "sendDailyMoppedReminder" || fn === "checkMoppedEmailReplies") {
       ScriptApp.deleteTrigger(t);
     }
   });
 
-  // 1. Alle 2 Tage um 19:00 Uhr erinnern
+  // 1. TÄGLICH um 19:00 Uhr erinnern
   ScriptApp.newTrigger("sendTwoDayMoppedReminder")
     .timeBased()
-    .everyDays(2)
+    .everyDays(1)
     .atHour(CONFIG.REMINDER_HOUR)
     .create();
 
@@ -67,7 +73,7 @@ function setupTwoDayMoppedBot() {
 
   const auth = getFirebaseAuth();
   if (auth) {
-    Logger.log("✅ Firebase-Datenbank erfolgreich ohne Passwort verbunden (UID: " + auth.uid + ")!");
+    Logger.log("✅ Firebase-Datenbank erfolgreich verbunden (UID: " + auth.uid + ")!");
   } else {
     Logger.log("❌ Verbindung fehlgeschlagen – bitte den Bot-Code erneut aus der Moppedtagebuch-App kopieren.");
     return;
@@ -80,12 +86,12 @@ function setupTwoDayMoppedBot() {
   const currentState = getCurrentBikeState();
   Logger.log("📊 Aktueller KM-Stand in der Cloud-Datenbank: " + currentState.currentKm + " km");
 
-  // Neue Erinnerungs-Mail mit dem aktuellen Stand senden
+  // Tägliche Erinnerungs-Mail mit dem aktuellen Stand senden
   sendTwoDayMoppedReminder();
 }
 
 /**
- * 📩 Sendet die 2-Tage-Erinnerung mit 1-Klick-Buttons & Antwort-Funktion
+ * 📩 Sendet die tägliche Erinnerung mit Tankrechnungs- & KM-Antwortfunktion
  */
 function sendTwoDayMoppedReminder() {
   const state = getCurrentBikeState();
@@ -94,7 +100,7 @@ function sendTwoDayMoppedReminder() {
   const kmToService = Math.max(0, nextService - currentKm);
   const dateStr = Utilities.formatDate(new Date(), "Europe/Berlin", "dd.MM.yyyy");
 
-  const subject = \`🏍️ Mopped-Check (\${dateStr}): \${CONFIG.BIKE_NAME} steht bei \${currentKm.toLocaleString("de-DE")} km – Update?\`;
+  const subject = \`🏍️ Mopped-Check (\${dateStr}): \${CONFIG.BIKE_NAME} steht bei \${currentKm.toLocaleString("de-DE")} km – Update / Tanken?\`;
 
   const quickOpenUrl = \`\${CONFIG.APP_URL}/?quick=1\`;
   const add100Url = \`\${CONFIG.APP_URL}/?quick=1&addKm=100&autosave=1\`;
@@ -104,7 +110,7 @@ function sendTwoDayMoppedReminder() {
   const htmlBody = \`
     <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:520px;margin:0 auto;background:#121212;color:#ffffff;border-radius:20px;overflow:hidden;border:1px solid rgba(105,190,40,0.35);">
       <div style="background:linear-gradient(135deg,#1b3314,#121212);padding:22px 20px;text-align:center;border-bottom:1px solid rgba(105,190,40,0.25);">
-        <div style="font-size:11px;text-transform:uppercase;letter-spacing:1.2px;color:#69BE28;font-weight:700;">🏍️ Moppedtagebuch • 2-Tage-Check</div>
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:1.2px;color:#69BE28;font-weight:700;">🏍️ Moppedtagebuch • Täglicher Check</div>
         <h2 style="margin:6px 0 8px 0;font-size:24px;color:#ffffff;">\${CONFIG.BIKE_NAME}</h2>
         <span style="background:#69BE28;color:#000;padding:4px 12px;border-radius:10px;font-weight:800;font-size:13px;">\${state.licensePlate || CONFIG.LICENSE_PLATE}</span>
 
@@ -128,16 +134,17 @@ function sendTwoDayMoppedReminder() {
 
       <div style="padding:20px;">
         <div style="background:#1e1e1e;border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:14px 16px;margin-bottom:16px;">
-          <div style="font-size:14px;font-weight:700;color:#69BE28;margin-bottom:6px;">💬 Weg 1: Einfach auf diese Mail antworten!</div>
-          <div style="font-size:13px;color:#d0d0d0;line-height:1.5;">
-            Antworte direkt mit einer Zeile auf diese E-Mail:<br>
-            • <code style="color:#69BE28;font-weight:700;">\${currentKm + 180}</code> → setzt den neuen KM-Stand<br>
-            • <code style="color:#69BE28;font-weight:700;">+180</code> → addiert 180 km zum aktuellen Stand<br>
-            • <code style="color:#69BE28;font-weight:700;">\${currentKm + 220}, 28.50 Tanken</code> → KM + Tankbeleg speichern
+          <div style="font-size:14px;font-weight:700;color:#69BE28;margin-bottom:8px;">💬 Einfach auf diese Mail antworten (1 Zeile genügt):</div>
+          <div style="font-size:13px;color:#d0d0d0;line-height:1.6;">
+            ⛽ <b>Tankrechnung (Betrag, Datum, Tankstelle):</b><br>
+            • <code style="color:#69BE28;font-weight:700;">28,50, \${dateStr}, Aral</code><br>
+            • <code style="color:#69BE28;font-weight:700;">\${currentKm + 200}, 31,40, \${dateStr}, Shell</code> <i>(inkl. KM-Stand)</i><br><br>
+            🛣️ <b>Nur KM-Stand aktualisieren:</b><br>
+            • <code style="color:#69BE28;font-weight:700;">\${currentKm + 180}</code> oder <code style="color:#69BE28;font-weight:700;">+180</code>
           </div>
         </div>
 
-        <div style="font-size:14px;font-weight:700;color:#ffffff;margin-bottom:10px;text-align:center;">⚡ Weg 2: 1-Klick Schnelleingabe (iPhone & Mac)</div>
+        <div style="font-size:14px;font-weight:700;color:#ffffff;margin-bottom:10px;text-align:center;">⚡ Oder per 1-Klick in der App (iPhone & Mac)</div>
 
         <div style="text-align:center;margin-bottom:12px;">
           <a href="\${add100Url}" style="display:inline-block;background:#1e2d19;color:#69BE28;border:1px solid #69BE28;text-decoration:none;padding:10px 14px;border-radius:12px;font-weight:700;font-size:13px;margin:4px;">+100 km</a>
@@ -146,11 +153,11 @@ function sendTwoDayMoppedReminder() {
         </div>
 
         <div style="text-align:center;margin-top:14px;">
-          <a href="\${quickOpenUrl}" style="display:block;background:#69BE28;color:#000000;text-decoration:none;padding:13px 20px;border-radius:99px;font-weight:800;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">⚡ Schnell-Check & Tanken öffnen</a>
+          <a href="\${quickOpenUrl}" style="display:block;background:#69BE28;color:#000000;text-decoration:none;padding:13px 20px;border-radius:99px;font-weight:800;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">⚡ Schnell-Check & Tankrechnung öffnen</a>
         </div>
 
         <div style="font-size:11px;color:#777;text-align:center;margin-top:14px;">
-          Letztes Update: \${state.lastUpdated || "unbekannt"} • Erinnerungs-Intervall: alle 2 Tage
+          Letztes Update: \${state.lastUpdated || "unbekannt"} • Erinnerungs-Intervall: täglich
         </div>
       </div>
     </div>
@@ -205,7 +212,7 @@ function checkMoppedEmailReplies() {
       if (
         firstLine.indexOf("🏍️") !== -1 ||
         firstLine.indexOf("✅") !== -1 ||
-        firstLine.indexOf("Moppedtagebuch • 2-Tage-Check") !== -1 ||
+        firstLine.indexOf("Moppedtagebuch •") !== -1 ||
         firstLine.indexOf("Direkt im Moppedtagebuch gespeichert") !== -1
       ) {
         return;
@@ -237,11 +244,11 @@ function checkMoppedEmailReplies() {
 
   const kmAlreadyInCloud = newest.parsed.km && String(liveState.currentKm) === String(newest.parsed.km);
   if (newest.msgId === lastAppliedId && (kmAlreadyInCloud || !newest.parsed.km)) {
-    Logger.log("ℹ️ Neueste Antwort ('" + newest.firstLine + "') ist bereits in der Cloud aktiv (" + liveState.currentKm + " km).");
+    Logger.log("ℹ️ Neueste Antwort ('" + newest.firstLine + "') wurde bereits gespeichert.");
     return;
   }
 
-  Logger.log("📩 Wende neueste E-Mail-Antwort an: '" + newest.firstLine + "' vom " + newest.msg.getDate());
+  Logger.log("📩 Wende neueste E-Mail-Antwort an: '" + newest.firstLine + "' -> " + JSON.stringify(newest.parsed));
   const res = applyParsedEntry(newest.parsed, liveState);
 
   if (res.wroteDirectToFirestore) {
@@ -255,63 +262,118 @@ function checkMoppedEmailReplies() {
       htmlBody: \`
         <div style="font-family:-apple-system,sans-serif;padding:18px;background:#121212;color:#fff;border-radius:16px;border:1px solid #69BE28;max-width:460px;">
           <h3 style="margin:0 0 8px 0;color:#69BE28;">✅ Direkt im Moppedtagebuch gespeichert!</h3>
-          <p style="margin:0 0 14px 0;font-size:15px;">\${res.summary}</p>
-          <a href="\${CONFIG.APP_URL}" style="display:inline-block;background:#69BE28;color:#000;padding:10px 16px;border-radius:99px;text-decoration:none;font-weight:700;">Im Moppedtagebuch öffnen →</a>
+          <p style="margin:0 0 14px 0;font-size:15px;line-height:1.5;">\${res.summary}</p>
+          <a href="\${CONFIG.APP_URL}/finance" style="display:inline-block;background:#69BE28;color:#000;padding:10px 16px;border-radius:99px;text-decoration:none;font-weight:700;">Im Moppedtagebuch ansehen →</a>
         </div>
       \`
     });
   }
 }
 
+/**
+ * Parst E-Mail-Antworten flexibel für:
+ * - Tankrechnungen: Betrag + Datum + Tankstelle (z.B. "28,50, 02.11.2026, Aral" oder "31.20 01.11. Shell")
+ * - KM-Stand: "39250" oder "+180"
+ * - Kombination: "39250, 28,50, 02.11.2026, Aral"
+ */
 function parseReplyLine(line) {
-  const normalized = line.replace(/(\\d{1,3})\\.(\\d{3})\\b/g, "$1$2").trim();
+  let working = line.trim();
+  const now = new Date();
+  const currentYear = now.getFullYear();
+
   const result = {
     km: null,
     addKm: null,
     amount: null,
     cat: "Fuel",
+    station: "",
     desc: "",
-    date: Utilities.formatDate(new Date(), "Europe/Berlin", "yyyy-MM-dd")
+    date: Utilities.formatDate(now, "Europe/Berlin", "yyyy-MM-dd"),
+    dateDisplay: Utilities.formatDate(now, "Europe/Berlin", "dd.MM.yyyy")
   };
 
-  const addMatch = normalized.match(/^\\+\\s*(\\d{1,5})\\b/);
+  // 1. ZUERST Datum erkennen & aus dem Text schneiden (damit Datum nie mit KM oder Betrag verwechselt wird)
+  // Format DD.MM.YYYY oder DD.MM.YY oder DD.MM.
+  const deDateMatch = working.match(/\\b(\\d{1,2})\\.(\\d{1,2})\\.(?:(\\d{2,4}))?\\b/);
+  const isoDateMatch = !deDateMatch && working.match(/\\b(\\d{4})-(\\d{1,2})-(\\d{1,2})\\b/);
+
+  if (deDateMatch) {
+    const day = ("0" + deDateMatch[1]).slice(-2);
+    const month = ("0" + deDateMatch[2]).slice(-2);
+    let year = deDateMatch[3] ? String(deDateMatch[3]) : String(currentYear);
+    if (year.length === 2) year = "20" + year;
+    result.date = \`\${year}-\${month}-\${day}\`;
+    result.dateDisplay = \`\${day}.\${month}.\${year}\`;
+    working = working.replace(deDateMatch[0], " ");
+  } else if (isoDateMatch) {
+    const year = isoDateMatch[1];
+    const month = ("0" + isoDateMatch[2]).slice(-2);
+    const day = ("0" + isoDateMatch[3]).slice(-2);
+    result.date = \`\${year}-\${month}-\${day}\`;
+    result.dateDisplay = \`\${day}.\${month}.\${year}\`;
+    working = working.replace(isoDateMatch[0], " ");
+  } else if (/\\bgestern\\b/i.test(working)) {
+    const yest = new Date(now.getTime() - 86400000);
+    result.date = Utilities.formatDate(yest, "Europe/Berlin", "yyyy-MM-dd");
+    result.dateDisplay = Utilities.formatDate(yest, "Europe/Berlin", "dd.MM.yyyy");
+    working = working.replace(/\\bgestern\\b/i, " ");
+  } else if (/\\bvorgestern\\b/i.test(working)) {
+    const beforeYest = new Date(now.getTime() - 2 * 86400000);
+    result.date = Utilities.formatDate(beforeYest, "Europe/Berlin", "yyyy-MM-dd");
+    result.dateDisplay = Utilities.formatDate(beforeYest, "Europe/Berlin", "dd.MM.yyyy");
+    working = working.replace(/\\bvorgestern\\b/i, " ");
+  } else if (/\\bheute\\b/i.test(working)) {
+    working = working.replace(/\\bheute\\b/i, " ");
+  }
+
+  // Tausenderpunkte bei 5-6-stelligen KM-Zahlen glätten (z.B. "39.150" -> "39150")
+  working = working.replace(/(\\b\\d{2,3})\\.(\\d{3}\\b)/g, "$1$2");
+
+  // 2. Relative KM (+180) erkennen
+  const addMatch = working.match(/(?:^|[\\s,;])\\+\\s*(\\d{1,5})\\s*(?:km)?\\b/i);
   if (addMatch) {
     result.addKm = parseInt(addMatch[1], 10);
+    working = working.replace(addMatch[0], " ");
   }
 
-  const parts = normalized.split(/[,;]/).map(s => s.trim()).filter(Boolean);
-
-  if (parts.length >= 1 && !result.addKm) {
-    const kmMatch = parts[0].match(/\\b(\\d{4,6})\\b/);
+  // 3. Absoluten KM-Stand erkennen (5- bis 6-stellige ganze Zahl ohne Nachkommastellen)
+  if (!result.addKm) {
+    const kmMatch = working.match(/(?:^|[\\s,;])(\\d{5,6})(?![.,]\\d)\\s*(?:km)?\\b/i);
     if (kmMatch) {
       result.km = parseInt(kmMatch[1], 10);
+      working = working.replace(kmMatch[0], " ");
     }
   }
 
-  const restText = parts.length > 1
-    ? parts.slice(1).join(" ")
-    : (result.km || result.addKm ? normalized.replace(/^\\+?\\d+\\s*(km)?/i, "").trim() : normalized);
-
-  if (restText) {
-    const amountMatch = restText.match(/(\\d{1,4}(?:[.,]\\d{1,2})?)\\s*€?/);
-    if (amountMatch) {
-      const val = parseFloat(amountMatch[1].replace(",", "."));
-      if (val > 0 && val !== result.km && val < 5000) {
-        result.amount = val;
-      }
+  // 4. Betrag in Euro erkennen (z.B. "28,50", "28.50", "28,50 €", "30€")
+  const amountMatch = working.match(/(?:^|[\\s,;])(\\d{1,3}(?:[.,]\\d{1,2})?|\\d{1,4}[.,]\\d{1,2})\\s*(?:€|eur|euro)?(?=$|[\\s,;])/i);
+  if (amountMatch) {
+    const val = parseFloat(amountMatch[1].replace(",", "."));
+    if (val > 0 && val < 5000) {
+      result.amount = val;
+      working = working.replace(amountMatch[0], " ");
     }
+  }
 
-    const lower = restText.toLowerCase();
-    if (lower.indexOf("service") !== -1 || lower.indexOf("wartung") !== -1 || lower.indexOf("inspektion") !== -1) {
-      result.cat = "Service";
-    } else if (lower.indexOf("teil") !== -1 || lower.indexOf("öl") !== -1 || lower.indexOf("kette") !== -1 || lower.indexOf("reifen") !== -1) {
-      result.cat = "Parts";
-    } else {
-      result.cat = "Fuel";
-    }
+  // 5. Übriger Text = Tankstelle / Beschreibung
+  let leftover = working
+    .replace(/\\b(km|euro|eur|€)\\b/gi, " ")
+    .replace(/^[,;\\s\\-]+|[,;\\s\\-]+$/g, "")
+    .replace(/\\s*[,;]\\s*/g, " ")
+    .replace(/\\s{2,}/g, " ")
+    .trim();
 
-    const customDesc = restText.replace(/(\\d{1,4}(?:[.,]\\d{1,2})?)\\s*€?/g, "").trim();
-    result.desc = customDesc || (result.cat === "Fuel" ? "Tanken" : "Eintrag per Bot");
+  // Falls "Tanken bei Aral" o.ä. geschrieben wurde, bereinigen
+  leftover = leftover.replace(/^(tanken|getankt)\\s*(bei|an der|in)?\\s*/i, "").trim();
+
+  if (leftover) {
+    result.station = leftover;
+  }
+
+  if (result.amount) {
+    result.desc = result.station
+      ? \`⛽ Tanken • \${result.station}\`
+      : "⛽ Tanken";
   }
 
   return result;
@@ -329,8 +391,9 @@ function applyParsedEntry(parsed, currentState) {
     newKm = oldKm + parsed.addKm;
   }
 
+  const hasKmChange = Boolean(parsed.km || parsed.addKm);
   const diff = newKm - oldKm;
-  const wroteDirectToFirestore = writeEntryDirectlyToFirestore(newKm, parsed);
+  const wroteDirectToFirestore = writeEntryDirectlyToFirestore(newKm, parsed, hasKmChange);
 
   if (wroteDirectToFirestore) {
     state.currentKm = String(newKm);
@@ -339,14 +402,16 @@ function applyParsedEntry(parsed, currentState) {
   }
 
   const summary = [];
-  if (parsed.km || parsed.addKm) {
+  if (hasKmChange) {
     summary.push(\`KM-Stand: \${newKm.toLocaleString("de-DE")} km\${diff > 0 ? \` (+\${diff} km)\` : ""}\`);
   }
   if (parsed.amount) {
-    summary.push(\`Ausgabe: € \${parsed.amount.toFixed(2)} (\${parsed.desc || "Tanken"})\`);
+    summary.push(
+      \`Tankrechnung: € \${parsed.amount.toFixed(2)} • Datum: \${parsed.dateDisplay}\${parsed.station ? \` • Tankstelle: \${parsed.station}\` : ""}\`
+    );
   }
   return {
-    summary: summary.join(" • "),
+    summary: summary.join(" | "),
     newKm: newKm,
     wroteDirectToFirestore: wroteDirectToFirestore
   };
@@ -391,7 +456,7 @@ function getCurrentBikeState() {
   return saved;
 }
 
-function writeEntryDirectlyToFirestore(newKm, parsed) {
+function writeEntryDirectlyToFirestore(newKm, parsed, hasKmChange) {
   const authData = getFirebaseAuth();
   if (!authData) return false;
 
@@ -421,20 +486,24 @@ function writeEntryDirectlyToFirestore(newKm, parsed) {
       Logger.log("❌ Firestore Patch Fehler: " + patchRes.getResponseCode() + " " + patchRes.getContentText());
       return false;
     }
-    Logger.log("✅ Firestore KM-Stand erfolgreich auf " + newKm + " km gesetzt!");
 
     if (parsed.amount && parsed.amount > 0) {
       const finUrl = \`\${baseUrl}/finance\`;
+      const descText = parsed.station
+        ? \`⛽ Tanken • \${parsed.station}\${hasKmChange ? \` (\${newKm} km)\` : ""}\`
+        : \`⛽ Tanken\${hasKmChange ? \` (\${newKm} km)\` : ""}\`;
+
       const finPayload = {
         fields: {
           date: { stringValue: parsed.date },
-          desc: { stringValue: \`\${parsed.desc || "Tanken"} (\${newKm} km)\` },
+          desc: { stringValue: descText },
+          station: { stringValue: parsed.station || "" },
           amount: { stringValue: parsed.amount.toFixed(2) },
           cat: { stringValue: parsed.cat || "Fuel" },
-          km: { stringValue: String(newKm) }
+          km: { stringValue: hasKmChange ? String(newKm) : "" }
         }
       };
-      UrlFetchApp.fetch(finUrl, {
+      const finRes = UrlFetchApp.fetch(finUrl, {
         method: "post",
         contentType: "application/json",
         headers: {
@@ -444,6 +513,9 @@ function writeEntryDirectlyToFirestore(newKm, parsed) {
         payload: JSON.stringify(finPayload),
         muteHttpExceptions: true
       });
+      if (finRes.getResponseCode() === 200) {
+        Logger.log("✅ Tankrechnung erfolgreich in Finanzen gespeichert: € " + parsed.amount.toFixed(2) + " (" + descText + ", " + parsed.date + ")");
+      }
     }
     return true;
   } catch (e) {
