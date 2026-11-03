@@ -1,20 +1,19 @@
 /**
  * 1080p Full-HD Video-Optimierung via Hardware-WebCodecs (`mediabunny`).
  *
- * WICHTIGER FIX (v1.11):
- * 1. In v1.10 hatten wir bei <= 1080p Videos `width`/`height`/`crop` weggelassen, wodurch
- *    `mediabunny` (`needsRerender = false`) versuchte, rohe 10-Bit-HDR-Frames vom iPhone/Mac
- *    ohne 8-Bit-SDR-Canvas-Normalisierung direkt an den H.264-Hardware-Encoder zu übergeben.
- *    Bei großen 10-Bit-Videos (z.B. 231 MB / 87 MB) brach Safari das Encoding ab!
- * 2. Lösung in v1.11:
- *    - Wir übergeben `width: targetW, height: targetH, fit: 'contain'` plus ein 100%-Vollbild-`crop`
- *      (`{ left: 0, top: 0, width: orientedW, height: orientedH }`). Dadurch wird `needsRerender = true`
- *      erzwungen und jedes Frame sauber über den 2x-Supersampling-Canvas auf 8-Bit SDR Full-HD (1920x1080)
- *      normalisiert – 100% stabil auf Safari/macOS & iOS!
- *    - Mehrstufiger Fallback (Stage 1: 1080p @ 50/60fps -> Stage 2: 1080p @ 30fps -> Stage 3: 720p @ 30fps)
- *      mit jeweils frischer `Input`-Instanz, damit kein Video jemals unkomprimiert durchrutscht.
- *    - Intelligente Bitraten-Steuerung (~5,5–6,2 Mbit/s für scharfes 1080p Full-HD, plus automatische
- *      Deckelung auf ~40–45 MB Zielgröße auch bei längeren Clips).
+ * WARUM 50/60-FPS-VIDEOS (231 MB / 87 MB) IN v1.10 UNKOMPRIMIERT BLIEBEN & WIE v1.12 DAS LÖST:
+ * 1. H.264 Level 4.0 (`avc1.424028`) Spezifikations-Limit:
+ *    `mediabunny` weist der Auflösung `1920x1080` (8.160 Makroblöcke) automatisch H.264 Level 4.0 zu.
+ *    Laut H.264-Standard erlaubt Level 4.0 maximal 245.760 Makroblöcke/Sekunde (= exakt 30,1 fps bei 1080p).
+ *    Übergibt man bei 1080p `frameRate: 50` oder `60`, lehnt Apples Hardware-VideoEncoder die
+ *    Konfiguration sofort als ungültig ab (`supported: false`)!
+ *    Deshalb wurde das 24-fps-Video (17,2 MB) komprimiert, während die beiden 50/60-fps-Videos
+ *    (231,5 MB und 86,9 MB) unkomprimiert hochgeladen wurden.
+ * 2. Lösung in v1.12:
+ *    - Wir kodieren 1080p Full-HD (`1920x1080`) konsequent mit Level-4.0-konformen `30 fps` und
+ *      hoher Bitrate (~5,8 Mbit/s, fast 3x höher als v1.9 + 2,25x höhere Auflösung!).
+ *    - Vollbild-Crop (`crop: { left: 0, top: 0, width, height }`) erzwingt die saubere 8-Bit-SDR
+ *      Normalisierung für 10-Bit-HDR-Videos vom iPhone.
  */
 
 import {
@@ -88,16 +87,6 @@ export async function transcodeVideoToWebMp4(inputBlob, onProgress) {
         const orientedH = Math.max(2, Math.round(rawOrientedH));
         const codec = await videoTrack.getCodec();
 
-        let sourceFps = 30;
-        try {
-            const packetStats = await videoTrack.computePacketStats(90);
-            if (packetStats?.averagePacketRate > 0) {
-                sourceFps = packetStats.averagePacketRate;
-            }
-        } catch {
-            // Fallback auf 30fps
-        }
-
         probeInput.dispose();
         probeInput = null;
 
@@ -118,22 +107,19 @@ export async function transcodeVideoToWebMp4(inputBlob, onProgress) {
         }
 
         // Optimale Ziel-Bitrate berechnen:
-        // - Standard für 1080p Full-HD: ~5,8 - 6,2 Mbit/s (fast 3x höher als v1.9 -> gestochen scharf!)
+        // - Standard für 1080p Full-HD @ 30fps: ~5,8 Mbit/s (fast 3x höher als v1.9 -> gestochen scharf!)
         // - Gleichzeitig begrenzen wir die Bitrate bei längeren Videos so, dass die Zieldatei
         //   unter ~42 MB bleibt (damit auch ein 231-MB-Video auf kompakte ~35-42 MB schrumpft!).
         const durationSafe = Math.max(1, duration || 30);
         const maxBitrateForTargetSize = Math.floor(((MAX_TARGET_FILE_BYTES * 8) / durationSafe) * 0.90);
         const maxBitrateVsSource = Number.isFinite(currentBitrate)
             ? Math.floor(currentBitrate * 0.72)
-            : 6_200_000;
+            : 5_800_000;
 
-        const idealFullHdBitrate = sourceFps > 35 ? 6_200_000 : 5_500_000;
         const targetBitrate = Math.max(
             2_600_000,
-            Math.min(idealFullHdBitrate, maxBitrateForTargetSize, maxBitrateVsSource)
+            Math.min(5_800_000, maxBitrateForTargetSize, maxBitrateVsSource)
         );
-
-        const nativeFpsRounded = Math.min(60, Math.max(24, Math.round(sourceFps || 30)));
 
         const runAttempt = async ({ maxDim, fps, bitrate, discardAudio }) => {
             let attemptInput = null;
@@ -166,7 +152,7 @@ export async function transcodeVideoToWebMp4(inputBlob, onProgress) {
                         width: targetW,
                         height: targetH,
                         fit: 'contain',
-                        // WICHTIG: Vollbild-Crop erzwingt `needsRerender = true` in mediabunny,
+                        // Vollbild-Crop erzwingt `needsRerender = true` in mediabunny,
                         // sodass 10-Bit-HDR-Videos vom iPhone sauber auf 8-Bit SDR normalisiert werden!
                         crop: {
                             left: 0,
@@ -221,9 +207,8 @@ export async function transcodeVideoToWebMp4(inputBlob, onProgress) {
             }
         };
 
-        // 4-stufige Sicherheits-Pipeline (von 1080p@60fps bis 720p@30fps Fallback)
+        // 3-stufige H.264 Level-konforme Pipeline (30fps ist zwingend für H.264 Level 4.0 @ 1080p!)
         const stages = [
-            { maxDim: 1920, fps: nativeFpsRounded, bitrate: targetBitrate, discardAudio: false },
             { maxDim: 1920, fps: 30, bitrate: targetBitrate, discardAudio: false },
             { maxDim: 1280, fps: 30, bitrate: Math.min(targetBitrate, 4_500_000), discardAudio: false },
             { maxDim: 1280, fps: 30, bitrate: Math.min(targetBitrate, 4_500_000), discardAudio: true }
@@ -419,7 +404,6 @@ export function generateVideoPosterBlob(source) {
         video.preload = 'auto';
         if (typeof source === 'string') {
             video.crossOrigin = 'anonymous';
-            // Cache-Buster anhängen, damit Safari keinen gecachten non-CORS Video-Response nutzt
             video.src = source + (source.includes('?') ? '&' : '?') + '_poster=' + Date.now();
         } else {
             objectUrl = URL.createObjectURL(source);

@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Camera, Trash2, X, Plus, Image as ImageIcon, Play, Film, Loader2, Zap, CheckCircle2 } from 'lucide-react';
 import { useCollection } from '../hooks/useFirestore';
 import { useStorage } from '../hooks/useStorage';
-import { getCachedVideoBlob } from '../utils/videoCache';
 
 const isVideoItem = (item) => {
     if (!item) return false;
@@ -22,7 +21,8 @@ const Gallery = () => {
     const {
         uploadFile,
         deleteFile,
-        optimizeExistingVideoInCloud,
+        replaceExistingVideoWithFile,
+        getCachedVideoBlob,
         ensurePosterForExistingVideo,
         isUploading,
         isOptimizingId,
@@ -34,11 +34,12 @@ const Gallery = () => {
     const [selectedImg, setSelectedImg] = useState(null);
     const [resolvedVideoSrc, setResolvedVideoSrc] = useState(null);
     const [isVideoBuffering, setIsVideoBuffering] = useState(false);
+    const [replaceTargetItem, setReplaceTargetItem] = useState(null);
     const playerRef = useRef(null);
+    const replaceInputRef = useRef(null);
     const activeObjectUrlRef = useRef(null);
     const posterCapturedForIdRef = useRef(new Set());
 
-    // ObjectURL sauber aufräumen, wenn das Modal geschlossen oder gewechselt wird
     useEffect(() => {
         return () => {
             if (activeObjectUrlRef.current) {
@@ -74,7 +75,6 @@ const Gallery = () => {
         setSelectedImg(item);
         setIsVideoBuffering(true);
 
-        // Prüfen, ob das Video bereits im schnellen lokalen Geräte-Cache liegt
         const cachedBlob = await getCachedVideoBlob(item.url);
         if (cachedBlob) {
             const localUrl = URL.createObjectURL(cachedBlob);
@@ -101,6 +101,23 @@ const Gallery = () => {
         }
     };
 
+    const handleReplaceFileSelected = async (e) => {
+        const file = e.target.files?.[0];
+        const targetItem = replaceTargetItem;
+        e.target.value = null;
+        setReplaceTargetItem(null);
+
+        if (!file || !targetItem) return;
+        try {
+            const updated = await replaceExistingVideoWithFile(targetItem, file);
+            if (updated && selectedImg?.id === targetItem.id) {
+                await openItemModal(updated);
+            }
+        } catch (err) {
+            alert('Komprimierung fehlgeschlagen: ' + err.message);
+        }
+    };
+
     const handleDelete = async (e, item, isVideo) => {
         e.stopPropagation();
         if (window.confirm(`Möchtest du dieses ${isVideo ? 'Video' : 'Foto'} wirklich löschen?`)) {
@@ -111,13 +128,28 @@ const Gallery = () => {
 
     const handleOptimizeVideo = async (e, item) => {
         if (e) e.stopPropagation();
-        try {
-            const updated = await optimizeExistingVideoInCloud(item);
-            if (updated && selectedImg?.id === item.id) {
-                await openItemModal(updated);
+        if (!item) return;
+
+        // 1. Prüfen, ob das Video bereits lokal im Geräte-Cache liegt
+        const cachedBlob = await getCachedVideoBlob(item.url);
+        if (cachedBlob && cachedBlob.size > 0) {
+            try {
+                const updated = await replaceExistingVideoWithFile(item, cachedBlob);
+                if (updated && selectedImg?.id === item.id) {
+                    await openItemModal(updated);
+                }
+            } catch (err) {
+                alert('Komprimierung fehlgeschlagen: ' + err.message);
             }
-        } catch (err) {
-            alert('Komprimierung fehlgeschlagen: ' + err.message);
+            return;
+        }
+
+        // 2. Da Firebase Storage den Rück-Download einer bereits hochgeladenen 231-MB-Datei
+        // im Browser per CORS sperrt, öffnen wir direkt die lokale Dateiauswahl, um das Video
+        // ohne Umweg lokal in 1080p Full-HD zu komprimieren und das alte Cloud-Video zu ersetzen.
+        setReplaceTargetItem(item);
+        if (replaceInputRef.current) {
+            replaceInputRef.current.click();
         }
     };
 
@@ -150,12 +182,19 @@ const Gallery = () => {
         }
     };
 
-    // Ein Video gilt als optimal, wenn es webOptimized ist und <= 65 MB hat
     const isTrulyOptimized = (p) => Boolean(p.webOptimized && (!p.sizeBytes || p.sizeBytes < 65 * 1024 * 1024));
-    const unoptimizedVideos = (photos || []).filter((p) => isVideoItem(p) && !isTrulyOptimized(p));
 
     return (
         <div className="content-container fade-in">
+            {/* Versteckter Datei-Dialog zum direkten lokalen Ersetzen eines alten großen Videos */}
+            <input
+                ref={replaceInputRef}
+                type="file"
+                accept="video/*"
+                onChange={handleReplaceFileSelected}
+                style={{ display: 'none' }}
+            />
+
             {/* Header */}
             <div className="card" style={{ marginBottom: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
@@ -163,7 +202,7 @@ const Gallery = () => {
                         <Camera className="icon-green" /> Galerie
                     </h2>
                     <p style={{ margin: '0.25rem 0 0 0', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-                        Fotos & Videos (1080p Full-HD • Verlustfrei optimiert)
+                        Fotos & Videos (1080p Full-HD • Automatisch optimiert)
                     </p>
                 </div>
 
@@ -174,54 +213,6 @@ const Gallery = () => {
                     <input type="file" onChange={handleFileChange} style={{ display: 'none' }} accept="image/*,video/*" />
                 </label>
             </div>
-
-            {/* Hinweis-Banner falls noch ein altes, unkomprimiertes Video (z.B. 231 MB / 87 MB) vorhanden ist */}
-            {!isUploading && unoptimizedVideos.length > 0 && (
-                <div
-                    className="card fade-in"
-                    style={{
-                        marginBottom: '1.25rem',
-                        padding: '0.85rem 1rem',
-                        border: '1px solid rgba(105, 190, 40, 0.45)',
-                        background: 'rgba(105, 190, 40, 0.1)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: '0.75rem',
-                        flexWrap: 'wrap'
-                    }}
-                >
-                    <div style={{ fontSize: '0.84rem', color: 'var(--text-primary)', lineHeight: 1.4 }}>
-                        <strong style={{ color: 'var(--kawasaki-green)' }}>⚡ 1080p Full-HD Optimierung verfügbar:</strong>{' '}
-                        {unoptimizedVideos.length === 1
-                            ? 'Ein vorhandenes Video ist noch unkomprimiert (Originalgröße) und kann jetzt ohne sichtbaren Qualitätsverlust auf 1080p Full-HD optimiert werden.'
-                            : `${unoptimizedVideos.length} vorhandene Videos sind noch unkomprimiert.`}
-                    </div>
-                    <button
-                        type="button"
-                        onClick={async () => {
-                            for (const v of unoptimizedVideos) {
-                                await handleOptimizeVideo(null, v);
-                            }
-                        }}
-                        style={{
-                            background: 'var(--kawasaki-green)',
-                            color: '#000',
-                            fontWeight: '700',
-                            fontSize: '0.8rem',
-                            padding: '8px 14px',
-                            borderRadius: '99px',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '6px',
-                            whiteSpace: 'nowrap'
-                        }}
-                    >
-                        <Zap size={15} />
-                        Jetzt auf 1080p Full-HD optimieren
-                    </button>
-                </div>
-            )}
 
             {/* Progress Bar */}
             {isUploading && (
@@ -453,7 +444,6 @@ const Gallery = () => {
                                     />
                                 )}
 
-                                {/* Direkt im Player-Modal: Button zum Optimieren falls noch altes unkomprimiertes Video */}
                                 <div style={{
                                     marginTop: '0.75rem',
                                     display: 'flex',
@@ -487,7 +477,7 @@ const Gallery = () => {
                                             ) : (
                                                 <>
                                                     <Zap size={15} />
-                                                    Jetzt auf 1080p Full-HD optimieren
+                                                    Originaldatei wählen & als 1080p Full-HD ersetzen
                                                 </>
                                             )}
                                         </button>
