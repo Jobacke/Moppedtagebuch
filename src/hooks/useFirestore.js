@@ -110,7 +110,13 @@ export function useCollection(collectionName) {
         await fetchFreshCollection();
     };
 
-    return { data, add, remove, loading, refresh: fetchFreshCollection };
+    const update = async (id, patch) => {
+        if (!currentUser || !id) return;
+        await setDoc(doc(db, `users/${currentUser.uid}/${collectionName}`, id), patch, { merge: true });
+        await fetchFreshCollection();
+    };
+
+    return { data, add, remove, update, loading, refresh: fetchFreshCollection };
 }
 
 export function useDocument(docName) {

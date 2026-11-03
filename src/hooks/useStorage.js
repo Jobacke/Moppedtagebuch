@@ -47,8 +47,9 @@ export function useStorage() {
         }
     };
 
-    const uploadFile = async (rawFile) => {
+    const uploadFile = async (rawFile, options = {}) => {
         if (!currentUser || !rawFile) return;
+        const targetFolderId = options?.folderId || null;
 
         setError(null);
         setIsUploading(true);
@@ -149,7 +150,8 @@ export function useStorage() {
                             url,
                             filePath,
                             ...(posterUrl ? { posterUrl, thumbPath } : {}),
-                            name: file.name,
+                            ...(targetFolderId ? { folderId: targetFolderId } : {}),
+                            name: rawFile.name || file.name,
                             sizeBytes: file.size,
                             mimeType: contentType,
                             mediaType: isVideo ? 'video' : 'image',
