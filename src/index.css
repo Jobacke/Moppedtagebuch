@@ -112,13 +112,16 @@ button {
   right: 0;
   max-width: 600px;
   margin: 0 auto;
-  background: rgba(18, 18, 18, 0.95);
-  backdrop-filter: blur(10px);
+  background: rgba(18, 18, 18, 0.96);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-top: 1px solid var(--border-color);
-  padding: 10px 0;
-  display: flex;
-  justify-content: space-around;
+  padding: 8px 4px calc(8px + env(safe-area-inset-bottom, 0px)) 4px;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  align-items: center;
   z-index: 100;
+  box-sizing: border-box;
 }
 
 .nav-item {
@@ -126,12 +129,31 @@ button {
   display: flex;
   flex-direction: column;
   align-items: center;
-  font-size: 0.75rem;
+  justify-content: center;
+  gap: 3px;
+  padding: 4px 2px;
+  min-width: 0;
+  width: 100%;
+  font-size: 0.68rem;
+  font-weight: 500;
   background: none;
+  border-radius: 10px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.nav-label {
+  display: block;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.1;
+  letter-spacing: -0.15px;
 }
 
 .nav-item.active {
   color: var(--kawasaki-green);
+  font-weight: 700;
 }
 
 .fade-in {

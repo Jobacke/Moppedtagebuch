@@ -124,12 +124,12 @@ function MainLayout({ onLock }) {
   };
 
   const navItems = [
-    { path: '/', label: 'Übersicht', icon: <Bike size={24} /> },
-    { path: '/tech', label: 'Technik', icon: <Settings size={24} /> },
-    { path: '/finance', label: 'Finanzen', icon: <DollarSign size={24} /> },
-    { path: '/service', label: 'Service', icon: <Wrench size={24} /> },
-    { path: '/accessories', label: 'Zubehör', icon: <Package size={24} /> },
-    { path: '/gallery', label: 'Galerie', icon: <Camera size={24} /> },
+    { path: '/', label: 'Übersicht', icon: <Bike size={20} /> },
+    { path: '/tech', label: 'Technik', icon: <Settings size={20} /> },
+    { path: '/finance', label: 'Finanzen', icon: <DollarSign size={20} /> },
+    { path: '/service', label: 'Service', icon: <Wrench size={20} /> },
+    { path: '/accessories', label: 'Zubehör', icon: <Package size={20} /> },
+    { path: '/gallery', label: 'Galerie', icon: <Camera size={20} /> },
   ];
 
   return (
@@ -146,7 +146,7 @@ function MainLayout({ onLock }) {
             borderRadius: '6px',
             fontWeight: '600',
             letterSpacing: '0.3px'
-          }}>v1.5</span>
+          }}>v1.6</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <button
@@ -214,7 +214,7 @@ function MainLayout({ onLock }) {
         onClearParams={clearUrlParams}
       />
 
-      <nav className="nav-bar scrollable-nav">
+      <nav className="nav-bar">
         {navItems.map((item) => (
           <button
             key={item.path}
@@ -222,19 +222,11 @@ function MainLayout({ onLock }) {
             onClick={() => navigate(item.path)}
           >
             {item.icon}
-            <span style={{ marginTop: 4 }}>{item.label}</span>
+            <span className="nav-label">{item.label}</span>
           </button>
         ))}
       </nav>
       <style>{`
-        .scrollable-nav {
-            overflow-x: auto;
-            justify-content: flex-start;
-            padding: 0 0.5rem;
-        }
-        .nav-item {
-            min-width: 70px;
-        }
         @keyframes spin360 {
             from { transform: rotate(0deg); }
             to { transform: rotate(360deg); }
