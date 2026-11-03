@@ -146,7 +146,7 @@ function MainLayout({ onLock }) {
             borderRadius: '6px',
             fontWeight: '600',
             letterSpacing: '0.3px'
-          }}>v1.8</span>
+          }}>v1.9</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <button

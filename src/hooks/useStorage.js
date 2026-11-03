@@ -57,12 +57,13 @@ export function useStorage() {
 
         const isVideo = rawFile.type.startsWith('video/') || /\.(mp4|mov|webm|m4v|3gp|avi|mkv)$/i.test(rawFile.name);
         let file = rawFile;
+        let wasCompressed = false;
         let posterBlob = null;
         const originalSizeMB = (rawFile.size / (1024 * 1024)).toFixed(1);
 
         if (isVideo) {
             setStatusText(`Komprimiere Video (${originalSizeMB} MB → HD-Stream)`);
-            const [transcodedFile, thumbBlob] = await Promise.all([
+            const [transcodeResult, thumbBlob] = await Promise.all([
                 transcodeVideoToWebMp4(rawFile, (pct) => {
                     // Phase 1: 0% -> 55% = Hardware-Komprimierung
                     const mapped = Math.max(1, Math.round(pct * 0.55));
@@ -71,7 +72,8 @@ export function useStorage() {
                 }),
                 generateVideoPosterBlob(rawFile)
             ]);
-            file = transcodedFile || rawFile;
+            file = transcodeResult?.file || rawFile;
+            wasCompressed = Boolean(transcodeResult?.wasCompressed || file.size < 25 * 1024 * 1024);
             posterBlob = thumbBlob;
         }
 
@@ -148,7 +150,7 @@ export function useStorage() {
                             sizeBytes: file.size,
                             mimeType: contentType,
                             mediaType: isVideo ? 'video' : 'image',
-                            webOptimized: isVideo,
+                            webOptimized: isVideo ? wasCompressed : true,
                             date: new Date().toISOString()
                         });
 
@@ -190,7 +192,7 @@ export function useStorage() {
             const originalMB = (rawBlob.size / (1024 * 1024)).toFixed(1);
 
             setStatusText(`Komprimiere ${originalMB} MB Video auf flüssiges HD...`);
-            const [compressedFile, posterBlob] = await Promise.all([
+            const [transcodeResult, posterBlob] = await Promise.all([
                 transcodeVideoToWebMp4(rawBlob, (pct) => {
                     const mapped = 10 + Math.round(pct * 0.55);
                     realProgressRef.current = mapped;
@@ -199,7 +201,8 @@ export function useStorage() {
                 generateVideoPosterBlob(rawBlob)
             ]);
 
-            const finalFile = compressedFile || rawBlob;
+            const finalFile = transcodeResult?.file || rawBlob;
+            const wasCompressed = Boolean(transcodeResult?.wasCompressed || finalFile.size < 25 * 1024 * 1024);
             const newMB = (finalFile.size / (1024 * 1024)).toFixed(1);
             setStatusText(`Speichere optimiertes Video (${newMB} MB statt ${originalMB} MB)...`);
             setBytesInfo({ transferred: 0, total: finalFile.size });
@@ -251,7 +254,7 @@ export function useStorage() {
                             sizeBytes: finalFile.size,
                             mimeType: 'video/mp4',
                             mediaType: 'video',
-                            webOptimized: true
+                            webOptimized: wasCompressed
                         };
 
                         await setDoc(doc(db, `users/${currentUser.uid}/photos`, videoItem.id), patch, { merge: true });

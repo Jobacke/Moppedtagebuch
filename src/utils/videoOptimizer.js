@@ -1,13 +1,20 @@
 /**
  * Echte HD-Videokomprimierung (H.264 + AAC + FastStart) direkt im Browser via WebCodecs (`mediabunny`).
  *
- * Warum hing das 134-MB-Video bisher?
- * - Ein 134 MB großes iPhone-Video hat eine Bitrate von ~25–45 Mbit/s (4K / 60fps).
- *   Um das live ohne Nachladen abzuspielen, müsste die Leitung konstant 4–6 MB pro Sekunde liefern.
- * - Bei deiner Website hatten wir die Videos auf ~2,5 Mbit/s (720p HD, H.264, FastStart) komprimiert,
- *   wodurch aus 134 MB nur noch ca. 10–18 MB werden!
- * - Dieses Modul führt genau diese Komprimierung vollautomatisch beim Upload UND auf Knopfdruck
- *   für bereits hochgeladene Videos durch (nutzt den Hardware-Chip von Mac & iPhone).
+ * WICHTIGER FIX (v1.9):
+ * In v1.8 hatten wir `copy: false` und `forceTranscode: true` auf der Audiospur gesetzt.
+ * Da Apples Safari (auf iPhone & Mac) das WebCodecs-Interface `AudioEncoder` für AAC
+ * noch nicht nativ bereitstellt, wurde die gesamte Konvertierung abgebrochen und die
+ * 134 MB große Originaldatei unkomprimiert hochgeladen!
+ *
+ * Lösung in v1.9:
+ * 1. Die originale AAC-Tonspur vom iPhone/Mac ist ohnehin winzig (~128 kbps = < 1 MB/Min)
+ *    und wird per `copy: { mode: 'preferred' }` 1:1 verlustfrei übernommen!
+ * 2. Zusätzlich registrieren wir `@mediabunny/aac-encoder` als Fallback, falls eine
+ *    Audiospur doch einmal transkodiert werden muss.
+ * 3. Das Video selbst wird per Hardware-`VideoEncoder` (der auf Safari/iOS/macOS und Chrome
+ *    voll hardwarebeschleunigt läuft) auf schlanke ~2,2 Mbit/s (720p HD, H.264, FastStart)
+ *    eingedampft -> aus 134 MB werden echte ~10–15 MB!
  */
 
 import {
@@ -18,11 +25,31 @@ import {
     Input,
     Mp4OutputFormat,
     Output,
-    Quality
+    Quality,
+    canEncodeAudio
 } from 'mediabunny';
+import { registerAacEncoder } from '@mediabunny/aac-encoder';
 
-const TARGET_VIDEO_BITRATE = 2_400_000; // 2.4 Mbps -> ~18 MB pro Minute Video, butterweiches Streaming
-const TARGET_AUDIO_BITRATE = 128_000;   // 128 kbps AAC
+let aacEncoderInitialized = false;
+
+async function ensureAacSupport() {
+    if (aacEncoderInitialized) return;
+    aacEncoderInitialized = true;
+    try {
+        const nativeAac = await canEncodeAudio('aac');
+        if (!nativeAac) {
+            registerAacEncoder();
+        }
+    } catch {
+        try {
+            registerAacEncoder();
+        } catch {
+            // ignore
+        }
+    }
+}
+
+const TARGET_VIDEO_BITRATE = 2_200_000; // 2.2 Mbps -> ~16 MB pro Minute Video, startet sofort ohne Puffern
 const MAX_VIDEO_DIMENSION = 1280;       // 720p HD (1280x720 bzw. 720x1280 Hochformat)
 
 /**
@@ -31,11 +58,13 @@ const MAX_VIDEO_DIMENSION = 1280;       // 720p HD (1280x720 bzw. 720x1280 Hochf
  *
  * @param {File|Blob} inputBlob
  * @param {(progress0to100: number) => void} onProgress
- * @returns {Promise<File>}
+ * @returns {Promise<{ file: File, wasCompressed: boolean }>}
  */
 export async function transcodeVideoToWebMp4(inputBlob, onProgress) {
     let input = null;
     try {
+        await ensureAacSupport();
+
         input = new Input({
             formats: ALL_FORMATS,
             source: new BlobSource(inputBlob)
@@ -44,7 +73,8 @@ export async function transcodeVideoToWebMp4(inputBlob, onProgress) {
         const videoTrack = await input.getPrimaryVideoTrack();
         if (!videoTrack) {
             input.dispose();
-            return ensureFastStartMp4(inputBlob);
+            const fastFile = await ensureFastStartMp4(inputBlob);
+            return { file: fastFile, wasCompressed: false };
         }
 
         const duration = (await input.getDurationFromMetadata()) || (await input.computeDuration()) || 0;
@@ -52,19 +82,20 @@ export async function transcodeVideoToWebMp4(inputBlob, onProgress) {
         const displayH = (await videoTrack.getDisplayHeight()) || 720;
         const codec = await videoTrack.getCodec();
 
-        // Prüfen, ob das Video bereits klein und web-optimiert ist (< 3.2 Mbps, <= 1280px, H.264)
+        // Prüfen, ob das Video bereits klein und web-optimiert ist (< 2.8 Mbps, <= 1280px, H.264, < 18 MB)
         const currentBitrate = duration > 0 ? (inputBlob.size * 8) / duration : Infinity;
         const maxSide = Math.max(displayW, displayH);
 
         if (
             codec === 'avc' &&
             maxSide <= MAX_VIDEO_DIMENSION &&
-            currentBitrate <= 3_200_000 &&
-            inputBlob.size < 25 * 1024 * 1024
+            currentBitrate <= 2_800_000 &&
+            inputBlob.size < 18 * 1024 * 1024
         ) {
             input.dispose();
             if (onProgress) onProgress(100);
-            return ensureFastStartMp4(inputBlob);
+            const fastFile = await ensureFastStartMp4(inputBlob);
+            return { file: fastFile, wasCompressed: true };
         }
 
         // Zielauflösung berechnen (immer gerade Zahlen für H.264!)
@@ -72,66 +103,82 @@ export async function transcodeVideoToWebMp4(inputBlob, onProgress) {
         const targetW = Math.max(2, Math.round((displayW * scale) / 2) * 2);
         const targetH = Math.max(2, Math.round((displayH * scale) / 2) * 2);
 
-        const target = new BufferTarget();
-        const output = new Output({
-            format: new Mp4OutputFormat({ fastStart: 'in-memory' }),
-            target
-        });
+        const runConversion = async (discardAudio = false) => {
+            const target = new BufferTarget();
+            const output = new Output({
+                format: new Mp4OutputFormat({ fastStart: 'in-memory' }),
+                target
+            });
 
-        const conversion = await Conversion.init({
-            input,
-            output,
-            copy: false,
-            showWarnings: false,
-            video: {
-                codec: 'avc',
-                width: targetW,
-                height: targetH,
-                frameRate: 30,
-                keyFrameInterval: 2,
-                hardwareAcceleration: 'no-preference',
-                quality: new Quality({
-                    bitrate: TARGET_VIDEO_BITRATE,
-                    bitrateMode: 'variable'
-                }),
-                forceTranscode: true
-            },
-            audio: {
-                codec: 'aac',
-                numberOfChannels: 2,
-                sampleRate: 48000,
-                quality: new Quality({
-                    bitrate: TARGET_AUDIO_BITRATE
-                }),
-                forceTranscode: true
+            const conversion = await Conversion.init({
+                input,
+                output,
+                // WICHTIG: Erlaubt das direkte 1:1-Kopieren der AAC-Audiospur ohne Re-Encoding!
+                copy: {
+                    mode: 'preferred',
+                    shiftTolerance: Infinity
+                },
+                showWarnings: false,
+                video: {
+                    codec: 'avc',
+                    width: targetW,
+                    height: targetH,
+                    fit: 'contain',
+                    frameRate: 30,
+                    keyFrameInterval: 2,
+                    hardwareAcceleration: 'no-preference',
+                    quality: new Quality({
+                        bitrate: TARGET_VIDEO_BITRATE,
+                        bitrateMode: 'variable'
+                    }),
+                    forceTranscode: true
+                },
+                audio: discardAudio
+                    ? { discard: true }
+                    : {
+                        // Kein forceTranscode! So wird vorhandenes AAC auf iPhone/Mac direkt kopiert
+                        // und sonst per @mediabunny/aac-encoder nach AAC gewandelt.
+                        codec: 'aac'
+                    }
+            });
+
+            if (!conversion.isValid) {
+                return null;
             }
-        });
 
-        if (!conversion.isValid) {
-            input.dispose();
-            return ensureFastStartMp4(inputBlob);
-        }
+            conversion.onProgress = (ratio) => {
+                if (onProgress) {
+                    onProgress(Math.min(99, Math.round((ratio || 0) * 100)));
+                }
+            };
 
-        conversion.onProgress = (ratio) => {
-            if (onProgress) {
-                onProgress(Math.min(99, Math.round((ratio || 0) * 100)));
-            }
+            await conversion.execute();
+            return target.buffer;
         };
 
-        await conversion.execute();
+        let outputBuffer = await runConversion(false);
+        if (!outputBuffer || outputBuffer.byteLength === 0) {
+            // Sicherheits-Fallback falls ein exotischer Audio-Track Probleme macht
+            outputBuffer = await runConversion(true);
+        }
+
         input.dispose();
 
-        if (target.buffer && target.buffer.byteLength > 0) {
+        if (outputBuffer && outputBuffer.byteLength > 0) {
             if (onProgress) onProgress(100);
             const rawName = inputBlob.name || 'video.mp4';
             const cleanName = rawName.replace(/\.[^.]+$/, '') + '_hd.mp4';
-            return new File([target.buffer], cleanName, {
+            const compressedFile = new File([outputBuffer], cleanName, {
                 type: 'video/mp4',
                 lastModified: Date.now()
             });
+            return {
+                file: compressedFile,
+                wasCompressed: compressedFile.size < inputBlob.size * 0.9
+            };
         }
     } catch (err) {
-        console.warn('Hardware-Transcoding Fallback auf FastStart:', err);
+        console.warn('Hardware-Transcoding Fehler:', err);
         if (input && !input.disposed) {
             try {
                 input.dispose();
@@ -141,7 +188,8 @@ export async function transcodeVideoToWebMp4(inputBlob, onProgress) {
         }
     }
 
-    return ensureFastStartMp4(inputBlob);
+    const fallbackFile = await ensureFastStartMp4(inputBlob);
+    return { file: fallbackFile, wasCompressed: false };
 }
 
 const readUint32 = (view, offset) => view.getUint32(offset, false);

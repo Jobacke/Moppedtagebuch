@@ -105,8 +105,9 @@ const Gallery = () => {
         }
     };
 
-    // Prüfen, ob in der Galerie noch unkomprimierte Videos liegen (z.B. das 134-MB-Video)
-    const unoptimizedVideos = (photos || []).filter((p) => isVideoItem(p) && !p.webOptimized);
+    // Prüfen, ob in der Galerie noch unkomprimierte Videos liegen (z.B. > 28 MB oder ohne echtes HD-Downsizing)
+    const isTrulyOptimized = (p) => Boolean(p.webOptimized && (!p.sizeBytes || p.sizeBytes < 35 * 1024 * 1024));
+    const unoptimizedVideos = (photos || []).filter((p) => isVideoItem(p) && !isTrulyOptimized(p));
 
     return (
         <div className="content-container fade-in">
@@ -295,9 +296,9 @@ const Gallery = () => {
                                         pointerEvents: 'none'
                                     }}>
                                         <Film size={12} />
-                                        {photo.webOptimized
+                                        {isTrulyOptimized(photo)
                                             ? `HD${photo.sizeBytes ? ` • ${formatMB(photo.sizeBytes)}` : ''}`
-                                            : 'Video'}
+                                            : `Video${photo.sizeBytes ? ` (${formatMB(photo.sizeBytes)})` : ''}`}
                                     </div>
                                 </>
                             ) : (
@@ -414,7 +415,7 @@ const Gallery = () => {
                                     gap: '0.75rem',
                                     flexWrap: 'wrap'
                                 }}>
-                                    {!selectedImg.webOptimized ? (
+                                    {!isTrulyOptimized(selectedImg) ? (
                                         <button
                                             type="button"
                                             disabled={isUploading}
