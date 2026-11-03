@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Camera, Trash2, X, Plus, Image as ImageIcon, Play, Film, Loader2 } from 'lucide-react';
+import { Camera, Trash2, X, Plus, Image as ImageIcon, Play, Film, Loader2, Zap, CheckCircle2 } from 'lucide-react';
 import { useCollection } from '../hooks/useFirestore';
 import { useStorage } from '../hooks/useStorage';
 
@@ -21,8 +21,10 @@ const Gallery = () => {
     const {
         uploadFile,
         deleteFile,
+        optimizeExistingVideoInCloud,
         ensurePosterForExistingVideo,
         isUploading,
+        isOptimizingId,
         progress,
         statusText,
         bytesInfo
@@ -56,13 +58,24 @@ const Gallery = () => {
         }
     };
 
+    const handleOptimizeVideo = async (e, item) => {
+        if (e) e.stopPropagation();
+        try {
+            const updated = await optimizeExistingVideoInCloud(item);
+            if (updated && selectedImg?.id === item.id) {
+                setSelectedImg(updated);
+                setIsVideoBuffering(false);
+            }
+        } catch (err) {
+            alert('Komprimierung fehlgeschlagen: ' + err.message);
+        }
+    };
+
     const openItemModal = (item) => {
         setIsVideoBuffering(isVideoItem(item));
         setSelectedImg(item);
     };
 
-    // Falls ein älteres Video noch kein gespeichertes Vorschaubild (posterUrl) hat,
-    // erzeugen wir es automatisch beim ersten Abspielen im Hintergrund!
     const handleVideoLoadedData = (item, videoEl) => {
         setIsVideoBuffering(false);
         if (!item || item.posterUrl || posterCapturedForIdRef.current.has(item.id) || !videoEl) return;
@@ -88,20 +101,23 @@ const Gallery = () => {
                 0.82
             );
         } catch {
-            // CORS / SecurityError falls ohne crossOrigin geladen -> ignorieren
+            // ignore CORS
         }
     };
+
+    // Prüfen, ob in der Galerie noch unkomprimierte Videos liegen (z.B. das 134-MB-Video)
+    const unoptimizedVideos = (photos || []).filter((p) => isVideoItem(p) && !p.webOptimized);
 
     return (
         <div className="content-container fade-in">
             {/* Header */}
-            <div className="card" style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div className="card" style={{ marginBottom: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
                     <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         <Camera className="icon-green" /> Galerie
                     </h2>
                     <p style={{ margin: '0.25rem 0 0 0', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-                        Fotos & Videos deiner Touren
+                        Fotos & Videos (automatisch HD-optimiert)
                     </p>
                 </div>
 
@@ -113,13 +129,64 @@ const Gallery = () => {
                 </label>
             </div>
 
+            {/* Hinweis-Banner falls noch ein altes, unkomprimiertes Video (z.B. 134 MB) vorhanden ist */}
+            {!isUploading && unoptimizedVideos.length > 0 && (
+                <div
+                    className="card fade-in"
+                    style={{
+                        marginBottom: '1.25rem',
+                        padding: '0.85rem 1rem',
+                        border: '1px solid rgba(105, 190, 40, 0.45)',
+                        background: 'rgba(105, 190, 40, 0.1)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '0.75rem',
+                        flexWrap: 'wrap'
+                    }}
+                >
+                    <div style={{ fontSize: '0.84rem', color: 'var(--text-primary)', lineHeight: 1.4 }}>
+                        <strong style={{ color: 'var(--kawasaki-green)' }}>⚡ Turbo-Optimierung verfügbar:</strong>{' '}
+                        {unoptimizedVideos.length === 1
+                            ? 'Dein vorhandenes Video ist noch unkomprimiert (Originalgröße) und ruckelt deshalb beim Streamen.'
+                            : `${unoptimizedVideos.length} vorhandene Videos sind noch unkomprimiert.`}
+                    </div>
+                    <button
+                        type="button"
+                        onClick={async () => {
+                            for (const v of unoptimizedVideos) {
+                                await handleOptimizeVideo(null, v);
+                            }
+                        }}
+                        style={{
+                            background: 'var(--kawasaki-green)',
+                            color: '#000',
+                            fontWeight: '700',
+                            fontSize: '0.8rem',
+                            padding: '8px 14px',
+                            borderRadius: '99px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            whiteSpace: 'nowrap'
+                        }}
+                    >
+                        <Zap size={15} />
+                        Jetzt auf HD komprimieren
+                    </button>
+                </div>
+            )}
+
             {/* Progress Bar */}
             {isUploading && (
                 <div className="card" style={{ marginBottom: '1.5rem', padding: '1rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
-                        <span>{statusText || 'Lade Datei hoch'} ({Math.round(progress)}%)...</span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', fontSize: '0.88rem', gap: '8px' }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <Loader2 size={15} className="spin-icon" color="var(--kawasaki-green)" />
+                            {statusText || 'Verarbeite'} ({Math.round(progress)}%)...
+                        </span>
                         {bytesInfo?.total > 0 && (
-                            <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', fontVariantNumeric: 'tabular-nums' }}>
+                            <span style={{ color: 'var(--text-secondary)', fontSize: '0.78rem', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
                                 {formatMB(bytesInfo.transferred)} / {formatMB(bytesInfo.total)}
                             </span>
                         )}
@@ -167,7 +234,6 @@ const Gallery = () => {
                             }}>
                             {isVideo ? (
                                 <>
-                                    {/* WICHTIG: Im Raster KEIN schweres <video> laden, wenn ein leichtes Poster-Bild existiert! */}
                                     {photo.posterUrl ? (
                                         <img
                                             src={photo.posterUrl}
@@ -220,7 +286,7 @@ const Gallery = () => {
                                         color: 'var(--kawasaki-green)',
                                         padding: '3px 7px',
                                         borderRadius: '6px',
-                                        fontSize: '0.7rem',
+                                        fontSize: '0.68rem',
                                         fontWeight: '700',
                                         display: 'flex',
                                         alignItems: 'center',
@@ -228,7 +294,10 @@ const Gallery = () => {
                                         backdropFilter: 'blur(4px)',
                                         pointerEvents: 'none'
                                     }}>
-                                        <Film size={12} /> Video
+                                        <Film size={12} />
+                                        {photo.webOptimized
+                                            ? `HD${photo.sizeBytes ? ` • ${formatMB(photo.sizeBytes)}` : ''}`
+                                            : 'Video'}
                                     </div>
                                 </>
                             ) : (
@@ -286,13 +355,14 @@ const Gallery = () => {
                             maxWidth: '900px',
                             maxHeight: '85vh',
                             display: 'flex',
+                            flexDirection: 'column',
                             alignItems: 'center',
                             justifyContent: 'center'
                         }}
                         onClick={(e) => e.stopPropagation()}
                     >
                         {isVideoItem(selectedImg) ? (
-                            <div style={{ position: 'relative', width: '100%', display: 'flex', justifyContent: 'center' }}>
+                            <div style={{ position: 'relative', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                                 {isVideoBuffering && (
                                     <div style={{
                                         position: 'absolute',
@@ -308,12 +378,12 @@ const Gallery = () => {
                                     }}>
                                         <Loader2 size={36} className="spin-icon" />
                                         <span style={{ fontSize: '0.8rem', color: '#ccc', background: 'rgba(0,0,0,0.6)', padding: '3px 10px', borderRadius: '99px' }}>
-                                            Starte Video...
+                                            Lade Video-Stream...
                                         </span>
                                     </div>
                                 )}
                                 <video
-                                    key={selectedImg.id}
+                                    key={selectedImg.url}
                                     ref={playerRef}
                                     src={selectedImg.url}
                                     poster={selectedImg.posterUrl || undefined}
@@ -327,25 +397,85 @@ const Gallery = () => {
                                     onLoadedData={(e) => handleVideoLoadedData(selectedImg, e.currentTarget)}
                                     style={{
                                         width: '100%',
-                                        maxHeight: '82vh',
+                                        maxHeight: '76vh',
                                         borderRadius: '12px',
                                         boxShadow: '0 0 28px rgba(0,0,0,0.8)',
                                         background: '#000',
                                         objectFit: 'contain'
                                     }}
                                 />
+
+                                {/* Direkt im Player-Modal: Button zum Komprimieren falls noch altes 134-MB-Video */}
+                                <div style={{
+                                    marginTop: '0.75rem',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '0.75rem',
+                                    flexWrap: 'wrap'
+                                }}>
+                                    {!selectedImg.webOptimized ? (
+                                        <button
+                                            type="button"
+                                            disabled={isUploading}
+                                            onClick={(e) => handleOptimizeVideo(e, selectedImg)}
+                                            style={{
+                                                background: 'var(--kawasaki-green)',
+                                                color: '#000',
+                                                fontWeight: '700',
+                                                fontSize: '0.82rem',
+                                                padding: '8px 16px',
+                                                borderRadius: '99px',
+                                                display: 'inline-flex',
+                                                alignItems: 'center',
+                                                gap: '6px'
+                                            }}
+                                        >
+                                            {isOptimizingId === selectedImg.id ? (
+                                                <>
+                                                    <Loader2 size={15} className="spin-icon" />
+                                                    {statusText || 'Komprimiere...'} ({Math.round(progress)}%)
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Zap size={15} />
+                                                    Video jetzt auf flüssiges HD komprimieren
+                                                </>
+                                            )}
+                                        </button>
+                                    ) : (
+                                        <span style={{
+                                            fontSize: '0.78rem',
+                                            color: 'var(--kawasaki-green)',
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '5px'
+                                        }}>
+                                            <CheckCircle2 size={14} />
+                                            HD-Stream optimiert{selectedImg.sizeBytes ? ` (${formatMB(selectedImg.sizeBytes)})` : ''}
+                                        </span>
+                                    )}
+                                    <span style={{ color: '#999', fontSize: '0.82rem' }}>
+                                        {new Date(selectedImg.date).toLocaleDateString('de-DE')}
+                                    </span>
+                                </div>
                             </div>
                         ) : (
-                            <img
-                                src={selectedImg.url}
-                                alt="Full view"
-                                style={{
-                                    maxWidth: '100%',
-                                    maxHeight: '85vh',
-                                    borderRadius: '8px',
-                                    boxShadow: '0 0 20px rgba(0,0,0,0.5)'
-                                }}
-                            />
+                            <>
+                                <img
+                                    src={selectedImg.url}
+                                    alt="Full view"
+                                    style={{
+                                        maxWidth: '100%',
+                                        maxHeight: '82vh',
+                                        borderRadius: '8px',
+                                        boxShadow: '0 0 20px rgba(0,0,0,0.5)'
+                                    }}
+                                />
+                                <div style={{ marginTop: '0.6rem', textAlign: 'center', color: '#999', fontSize: '0.85rem' }}>
+                                    {new Date(selectedImg.date).toLocaleDateString('de-DE')}
+                                </div>
+                            </>
                         )}
                         <button
                             onClick={() => setSelectedImg(null)}
@@ -359,11 +489,6 @@ const Gallery = () => {
                         >
                             <X size={24} />
                         </button>
-                        <div style={{
-                            position: 'absolute', bottom: '-30px', left: 0, right: 0, textAlign: 'center', color: '#999', fontSize: '0.85rem'
-                        }}>
-                            {new Date(selectedImg.date).toLocaleDateString('de-DE')}
-                        </div>
                     </div>
                 </div>
             )}

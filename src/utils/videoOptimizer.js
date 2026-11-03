@@ -1,15 +1,148 @@
 /**
- * Video-Optimierung für flüssiges Streaming & schnelle Vorschau (iPhone & Mac)
+ * Echte HD-Videokomprimierung (H.264 + AAC + FastStart) direkt im Browser via WebCodecs (`mediabunny`).
  *
- * 1. Erzeugt automatisch ein leichtgewichtiges JPEG-Vorschaubild (Poster-Thumbnail, ~30 KB)
- *    vom ersten Frame des Videos. Dadurch muss die Galerie NICHT mehr alle Videos im
- *    Hintergrund herunterladen, nur um das Raster anzuzeigen!
- * 2. Verschiebt bei MP4/MOV-Dateien den `moov`-Header an den Dateianfang ("FastStart"),
- *    damit das Video beim Antippen im Vollbild sofort in der ersten Sekunde anläuft,
- *    ohne dass erst die gesamte Datei geladen werden muss.
- * 3. Falls ein Video extrem groß ist (> 35 MB) und der Browser MediaRecorder unterstützt,
- *    oder falls bereits vorhandenen Videos das Thumbnail fehlt, kümmert sich dieses Modul darum.
+ * Warum hing das 134-MB-Video bisher?
+ * - Ein 134 MB großes iPhone-Video hat eine Bitrate von ~25–45 Mbit/s (4K / 60fps).
+ *   Um das live ohne Nachladen abzuspielen, müsste die Leitung konstant 4–6 MB pro Sekunde liefern.
+ * - Bei deiner Website hatten wir die Videos auf ~2,5 Mbit/s (720p HD, H.264, FastStart) komprimiert,
+ *   wodurch aus 134 MB nur noch ca. 10–18 MB werden!
+ * - Dieses Modul führt genau diese Komprimierung vollautomatisch beim Upload UND auf Knopfdruck
+ *   für bereits hochgeladene Videos durch (nutzt den Hardware-Chip von Mac & iPhone).
  */
+
+import {
+    ALL_FORMATS,
+    BlobSource,
+    BufferTarget,
+    Conversion,
+    Input,
+    Mp4OutputFormat,
+    Output,
+    Quality
+} from 'mediabunny';
+
+const TARGET_VIDEO_BITRATE = 2_400_000; // 2.4 Mbps -> ~18 MB pro Minute Video, butterweiches Streaming
+const TARGET_AUDIO_BITRATE = 128_000;   // 128 kbps AAC
+const MAX_VIDEO_DIMENSION = 1280;       // 720p HD (1280x720 bzw. 720x1280 Hochformat)
+
+/**
+ * Komprimiert eine Videodatei (Blob oder File) im Browser per Hardware-WebCodecs
+ * auf webfreundliches 720p HD MP4 (H.264 + AAC) inkl. FastStart-Header.
+ *
+ * @param {File|Blob} inputBlob
+ * @param {(progress0to100: number) => void} onProgress
+ * @returns {Promise<File>}
+ */
+export async function transcodeVideoToWebMp4(inputBlob, onProgress) {
+    let input = null;
+    try {
+        input = new Input({
+            formats: ALL_FORMATS,
+            source: new BlobSource(inputBlob)
+        });
+
+        const videoTrack = await input.getPrimaryVideoTrack();
+        if (!videoTrack) {
+            input.dispose();
+            return ensureFastStartMp4(inputBlob);
+        }
+
+        const duration = (await input.getDurationFromMetadata()) || (await input.computeDuration()) || 0;
+        const displayW = (await videoTrack.getDisplayWidth()) || 1280;
+        const displayH = (await videoTrack.getDisplayHeight()) || 720;
+        const codec = await videoTrack.getCodec();
+
+        // Prüfen, ob das Video bereits klein und web-optimiert ist (< 3.2 Mbps, <= 1280px, H.264)
+        const currentBitrate = duration > 0 ? (inputBlob.size * 8) / duration : Infinity;
+        const maxSide = Math.max(displayW, displayH);
+
+        if (
+            codec === 'avc' &&
+            maxSide <= MAX_VIDEO_DIMENSION &&
+            currentBitrate <= 3_200_000 &&
+            inputBlob.size < 25 * 1024 * 1024
+        ) {
+            input.dispose();
+            if (onProgress) onProgress(100);
+            return ensureFastStartMp4(inputBlob);
+        }
+
+        // Zielauflösung berechnen (immer gerade Zahlen für H.264!)
+        const scale = Math.min(1, MAX_VIDEO_DIMENSION / maxSide);
+        const targetW = Math.max(2, Math.round((displayW * scale) / 2) * 2);
+        const targetH = Math.max(2, Math.round((displayH * scale) / 2) * 2);
+
+        const target = new BufferTarget();
+        const output = new Output({
+            format: new Mp4OutputFormat({ fastStart: 'in-memory' }),
+            target
+        });
+
+        const conversion = await Conversion.init({
+            input,
+            output,
+            copy: false,
+            showWarnings: false,
+            video: {
+                codec: 'avc',
+                width: targetW,
+                height: targetH,
+                frameRate: 30,
+                keyFrameInterval: 2,
+                hardwareAcceleration: 'no-preference',
+                quality: new Quality({
+                    bitrate: TARGET_VIDEO_BITRATE,
+                    bitrateMode: 'variable'
+                }),
+                forceTranscode: true
+            },
+            audio: {
+                codec: 'aac',
+                numberOfChannels: 2,
+                sampleRate: 48000,
+                quality: new Quality({
+                    bitrate: TARGET_AUDIO_BITRATE
+                }),
+                forceTranscode: true
+            }
+        });
+
+        if (!conversion.isValid) {
+            input.dispose();
+            return ensureFastStartMp4(inputBlob);
+        }
+
+        conversion.onProgress = (ratio) => {
+            if (onProgress) {
+                onProgress(Math.min(99, Math.round((ratio || 0) * 100)));
+            }
+        };
+
+        await conversion.execute();
+        input.dispose();
+
+        if (target.buffer && target.buffer.byteLength > 0) {
+            if (onProgress) onProgress(100);
+            const rawName = inputBlob.name || 'video.mp4';
+            const cleanName = rawName.replace(/\.[^.]+$/, '') + '_hd.mp4';
+            return new File([target.buffer], cleanName, {
+                type: 'video/mp4',
+                lastModified: Date.now()
+            });
+        }
+    } catch (err) {
+        console.warn('Hardware-Transcoding Fallback auf FastStart:', err);
+        if (input && !input.disposed) {
+            try {
+                input.dispose();
+            } catch {
+                // ignore
+            }
+        }
+    }
+
+    return ensureFastStartMp4(inputBlob);
+}
 
 const readUint32 = (view, offset) => view.getUint32(offset, false);
 const writeUint32 = (view, offset, val) => view.setUint32(offset, val, false);
@@ -44,10 +177,6 @@ const CONTAINER_BOXES = new Set([
     'meta'
 ]);
 
-/**
- * Passt alle Chunk-Offsets (`stco` 32-Bit und `co64` 64-Bit) innerhalb der `moov`-Box
- * um `delta` Bytes an, wenn `moov` vor `mdat` geschoben wird.
- */
 function shiftChunkOffsetsInBox(view, start, end, delta) {
     let pos = start;
     while (pos + 8 <= end) {
@@ -90,13 +219,8 @@ function shiftChunkOffsetsInBox(view, start, end, delta) {
     }
 }
 
-/**
- * Macht eine MP4/MOV-Datei "FastStart"-fähig (verschiebt den `moov`-Atom-Header vor `mdat`),
- * damit Browser auf iPhone & Mac sofort per HTTP-Range-Stream losspielen können.
- */
 export async function ensureFastStartMp4(file) {
     try {
-        // Nur für Dateien bis 250 MB im Arbeitsspeicher ausführen
         if (!file || file.size > 250 * 1024 * 1024) return file;
 
         const buffer = await file.arrayBuffer();
@@ -122,7 +246,6 @@ export async function ensureFastStartMp4(file) {
         const moovIdx = boxes.findIndex((b) => b.type === 'moov');
         const mdatIdx = boxes.findIndex((b) => b.type === 'mdat');
 
-        // Wenn kein moov/mdat vorhanden oder moov bereits VOR mdat liegt -> schon optimal!
         if (moovIdx === -1 || mdatIdx === -1 || moovIdx < mdatIdx) {
             return file;
         }
@@ -131,7 +254,6 @@ export async function ensureFastStartMp4(file) {
         const moovBuffer = buffer.slice(moovBox.offset, moovBox.offset + moovBox.size);
         const moovView = new DataView(moovBuffer);
 
-        // Da moov vor mdat geschoben wird, verschieben sich alle mdat-Offsets um +moovBox.size
         shiftChunkOffsetsInBox(moovView, 8, moovBox.size, moovBox.size);
 
         const outBytes = new Uint8Array(totalLen);
@@ -139,7 +261,6 @@ export async function ensureFastStartMp4(file) {
 
         for (let i = 0; i < boxes.length; i++) {
             if (i === mdatIdx) {
-                // Zuerst das angepasste moov einfügen
                 outBytes.set(new Uint8Array(moovBuffer), writeOffset);
                 writeOffset += moovBox.size;
             }
@@ -150,7 +271,7 @@ export async function ensureFastStartMp4(file) {
             writeOffset += b.size;
         }
 
-        const cleanName = file.name.replace(/\.(mov|m4v)$/i, '.mp4');
+        const cleanName = (file.name || 'video.mp4').replace(/\.(mov|m4v)$/i, '.mp4');
         return new File([outBytes], cleanName, {
             type: 'video/mp4',
             lastModified: Date.now()
@@ -161,10 +282,6 @@ export async function ensureFastStartMp4(file) {
     }
 }
 
-/**
- * Extrahiert ein gestochen scharfes, kleines JPEG-Vorschaubild (max. 640px, ~30 KB)
- * aus einer lokalen Video-Datei oder einer Video-URL.
- */
 export function generateVideoPosterBlob(source) {
     return new Promise((resolve) => {
         const video = document.createElement('video');
