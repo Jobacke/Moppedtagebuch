@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, Calendar, Wrench } from 'lucide-react';
-import { useCollection } from '../hooks/useFirestore';
+import { Plus, Trash2, Calendar } from 'lucide-react';
+import { useCollection, useDocument } from '../hooks/useFirestore';
 
 const Service = () => {
     const { data: logs, add, remove, loading } = useCollection('service');
+    const { data: techData, update: updateTechData } = useDocument('technical_data');
     const [adding, setAdding] = useState(false);
     const [newLog, setNewLog] = useState({ date: '', km: '', work: '', nextDue: '', cost: '' });
 
@@ -12,6 +13,18 @@ const Service = () => {
         if (!newLog.work || !newLog.date) return;
 
         await add(newLog);
+
+        // Falls ein neuer, höherer KM-Stand beim Service eingetragen wurde, auch den Haupt-KM-Stand aktualisieren
+        const enteredKm = parseInt(newLog.km || '0', 10);
+        const currentKm = parseInt(techData?.currentKm || '0', 10);
+        if (enteredKm > 0 && enteredKm >= currentKm) {
+            await updateTechData({
+                ...(techData || {}),
+                currentKm: String(enteredKm),
+                lastUpdated: newLog.date,
+                lastUpdatedIso: new Date().toISOString()
+            });
+        }
 
         setNewLog({ date: '', km: '', work: '', nextDue: '', cost: '' });
         setAdding(false);

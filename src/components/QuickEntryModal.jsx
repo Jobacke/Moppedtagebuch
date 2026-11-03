@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Zap, X, Check, Fuel, Gauge, Wrench, Package, Plus, Send, Bot, ExternalLink, Copy } from 'lucide-react';
+import { Zap, X, Check, Fuel, Gauge, Wrench, Package, Plus, Send, Bot, ExternalLink, Copy, Key } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 
 const CATEGORIES = [
     { value: 'Fuel', label: '⛽ Tanken' },

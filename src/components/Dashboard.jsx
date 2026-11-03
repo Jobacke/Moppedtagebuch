@@ -1,5 +1,5 @@
-import React from 'react';
-import { Settings, DollarSign, Wrench, Package, Zap, Clock, CheckCircle2, AlertTriangle } from 'lucide-react';
+import React, { useEffect } from 'react';
+import { Settings, DollarSign, Wrench, Package, Zap, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useDocument, useCollection } from '../hooks/useFirestore';
 
@@ -7,14 +7,35 @@ const Dashboard = ({ onOpenQuickEntry }) => {
     const navigate = useNavigate();
 
     // Fetch data
-    const { data: techData } = useDocument('technical_data');
+    const { data: techData, update: updateTechData } = useDocument('technical_data');
     const { data: financeData } = useCollection('finance');
     const { data: serviceData } = useCollection('service');
     const { data: accessoriesData } = useCollection('accessories');
 
-    // Calculate stats
-    const totalKm = techData?.currentKm || '---';
+    // Calculate highest KM stand across technical_data, service, and finance
+    const techKmNum = parseInt(String(techData?.currentKm || '0').replace(/\D/g, ''), 10) || 0;
+    const maxServiceKm = (serviceData || []).reduce((max, item) => {
+        const val = parseInt(String(item.km || '0').replace(/\D/g, ''), 10) || 0;
+        return val > max ? val : max;
+    }, 0);
+    const maxFinanceKm = (financeData || []).reduce((max, item) => {
+        const val = parseInt(String(item.km || '0').replace(/\D/g, ''), 10) || 0;
+        return val > max ? val : max;
+    }, 0);
+
+    const bestKmNum = Math.max(techKmNum, maxServiceKm, maxFinanceKm);
+    const totalKm = bestKmNum > 0 ? String(bestKmNum) : (techData?.currentKm || '---');
     const nextService = techData?.nextServiceDue || '---';
+
+    // Auto-heal technical_data if a higher KM stand was entered in Service or Finance
+    useEffect(() => {
+        if (techData && bestKmNum > techKmNum) {
+            updateTechData({
+                ...techData,
+                currentKm: String(bestKmNum)
+            });
+        }
+    }, [bestKmNum, techKmNum, techData, updateTechData]);
 
     // Calculate generic expenses
     const financeTotal = financeData?.reduce((sum, item) => sum + parseFloat(item.amount || 0), 0) || 0;

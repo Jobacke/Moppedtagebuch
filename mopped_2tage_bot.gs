@@ -3,24 +3,11 @@
  * 🏍️ MOPPEDTAGEBUCH – 2-TAGE E-MAIL-BOT & ANTWORT-ASSISTENT (iPhone & Mac)
  * ============================================================================
  *
- * Funktionen dieses Bots:
- * 1. Schickt dir ALLE 2 TAGE eine kompakte Status-Mail für deine Versys 1000 SE
- *    auf iPhone & Mac.
- * 2. Du kannst EINFACH AUF DIE E-MAIL ANTWORTEN, z. B.:
- *    - "39150"                -> Setzt den KM-Stand auf 39.150 km
- *    - "+220"                 -> Addiert 220 km auf den aktuellen Stand
- *    - "39150, 28.50 Tanken"  -> Setzt KM auf 39.150 km + speichert 28,50 € Tanken
- *    - "29,80 Tanken"         -> Speichert 29,80 € unter Finanzen (Tanken)
- * 3. Oder du tippst in der E-Mail auf einen der 1-Klick-Buttons (+100 km, +200 km,
- *    +350 km, Tanken), die direkt deine Webapp öffnen und automatisch speichern!
- *
- * EINRICHTUNG (dauert 1 Minute):
- * 1. Öffne https://script.google.com -> "Neues Projekt"
- * 2. Diesen Code komplett einfügen und speichern.
- * 3. Optional: Trage unten bei FIREBASE_PASSWORD dein Moppedtagebuch-Passwort ein,
- *    damit der Bot deine E-Mail-Antworten sofort live in Firestore einträgt.
- * 4. Oben in der Leiste die Funktion "setupTwoDayMoppedBot" auswählen und auf
- *    "Ausführen" klicken -> Berechtigungen bestätigen -> Fertig!
+ * WICHTIG:
+ * Falls du den Code neu einfügst, kannst du FIREBASE_PASSWORD unten leer lassen,
+ * WENN du es beim letzten Mal schon einmal ausgeführt hast (es ist im Google-
+ * Skript-Speicher hinterlegt). Sicherheitshalber kannst du es in Zeile 25 aber
+ * auch jederzeit wieder eintragen.
  */
 
 const CONFIG = {
@@ -32,19 +19,21 @@ const CONFIG = {
   DEFAULT_NEXT_SERVICE: 52000,
   REMINDER_HOUR: 19, // 19:00 Uhr abends alle 2 Tage
 
-  // Firebase-Konfiguration (aus deiner Moppedtagebuch Webapp)
   FIREBASE_PROJECT_ID: "moppedtagebuch",
   FIREBASE_API_KEY: "AIzaSyCU4b7reiVNHjqvuEM7cXSLGilCmZ5YYlM",
   FIREBASE_EMAIL: "backhaus.johannes@gmail.com",
-  // Optional für Direkt-Schreibzugriff in Firestore ohne App-Öffnen:
-  FIREBASE_PASSWORD: "" 
+  FIREBASE_PASSWORD: ""
 };
 
 /**
- * 🚀 EINMALIG AUSFÜHREN: Richtet den 2-Tage-Trigger + Antwort-Checker ein
- * und schickt sofort eine erste Test-Nachricht.
+ * 🚀 EINMALIG AUSFÜHREN (oder zum manuellen Testen):
  */
 function setupTwoDayMoppedBot() {
+  const props = PropertiesService.getScriptProperties();
+  if (CONFIG.FIREBASE_PASSWORD) {
+    props.setProperty("SAVED_FIREBASE_PASSWORD", CONFIG.FIREBASE_PASSWORD);
+  }
+
   const triggers = ScriptApp.getProjectTriggers();
   triggers.forEach(t => {
     const fn = t.getHandlerFunction();
@@ -60,15 +49,28 @@ function setupTwoDayMoppedBot() {
     .atHour(CONFIG.REMINDER_HOUR)
     .create();
 
-  // 2. Alle 15 Minuten prüfen, ob du auf eine Bot-Mail geantwortet hast
+  // 2. Jede Minute prüfen, ob du auf eine Bot-Mail geantwortet hast
   ScriptApp.newTrigger("checkMoppedEmailReplies")
     .timeBased()
-    .everyMinutes(15)
+    .everyMinutes(1)
     .create();
 
-  // Direkt erste Mail zum Testen senden
+  const auth = getFirebaseAuth();
+  if (auth) {
+    Logger.log("✅ Firebase-Datenbank verbunden (Account: " + CONFIG.FIREBASE_EMAIL + ", UID: " + auth.uid + ")");
+  } else {
+    Logger.log("⚠️ ACHTUNG: Kein FIREBASE_PASSWORD gefunden! Bitte in Zeile 25 eintragen.");
+  }
+
+  // Zuerst die allerneueste E-Mail-Antwort auswerten und in Firestore schreiben
+  checkMoppedEmailReplies();
+
+  // Danach den aktuellen Stand aus Firestore holen und im Protokoll anzeigen
+  const currentState = getCurrentBikeState();
+  Logger.log("📊 Aktueller KM-Stand in der Cloud-Datenbank: " + currentState.currentKm + " km");
+
+  // Neue Erinnerungs-Mail mit dem aktuellen Stand senden
   sendTwoDayMoppedReminder();
-  Logger.log("✅ 2-Tage-Bot & Antwort-Checker aktiviert! Erste Mail wurde an " + CONFIG.RECIPIENT_EMAIL + " gesendet.");
 }
 
 /**
@@ -81,7 +83,7 @@ function sendTwoDayMoppedReminder() {
   const kmToService = Math.max(0, nextService - currentKm);
   const dateStr = Utilities.formatDate(new Date(), "Europe/Berlin", "dd.MM.yyyy");
 
-  const subject = `🏍️ Mopped-Check (${dateStr}): ${CONFIG.BIKE_NAME} steht bei ${ currentKm.toLocaleString("de-DE") } km – Update?`;
+  const subject = `🏍️ Mopped-Check (${dateStr}): ${CONFIG.BIKE_NAME} steht bei ${currentKm.toLocaleString("de-DE")} km – Update?`;
 
   const quickOpenUrl = `${CONFIG.APP_URL}/?quick=1`;
   const add100Url = `${CONFIG.APP_URL}/?quick=1&addKm=100&autosave=1`;
@@ -146,56 +148,114 @@ function sendTwoDayMoppedReminder() {
   MailApp.sendEmail({
     to: CONFIG.RECIPIENT_EMAIL,
     subject: subject,
+    name: "Mopped-Bot",
     htmlBody: htmlBody
   });
 }
 
 /**
- * 🔍 Prüft alle 15 Minuten, ob du auf die Mopped-Check-Mail geantwortet hast
+ * 🔍 Sucht alle deine E-Mail-Antworten der letzten 7 Tage, sortiert sie exakt
+ * nach Uhrzeit (Sekunden-genau) und wendet IMMER die allerneueste Antwort an!
  */
 function checkMoppedEmailReplies() {
-  const threads = GmailApp.search('subject:"Mopped-Check" is:unread', 0, 10);
+  const props = PropertiesService.getScriptProperties();
+  if (CONFIG.FIREBASE_PASSWORD) {
+    props.setProperty("SAVED_FIREBASE_PASSWORD", CONFIG.FIREBASE_PASSWORD);
+  }
+
+  const threads = GmailApp.search('(subject:"Mopped-Check" OR subject:"Moppedtagebuch aktualisiert") newer_than:7d', 0, 20);
   if (!threads.length) return;
+
+  const userReplies = [];
 
   threads.forEach(thread => {
     const messages = thread.getMessages();
     messages.forEach(msg => {
-      if (!msg.isUnread()) return;
+      const from = msg.getFrom() || "";
+      if (from.indexOf("Mopped-Bot") !== -1) return;
 
-      const body = msg.getPlainBody() || "";
-      const firstLine = body
+      const plainBody = msg.getPlainBody() || "";
+      const firstLine = plainBody
         .split(/\r?\n/)
         .map(l => l.trim())
-        .filter(l => l && !l.startsWith(">") && !l.startsWith("Am ") && !l.startsWith("On "))[0];
+        .filter(l =>
+          l &&
+          !l.startsWith(">") &&
+          !l.startsWith("Am ") &&
+          !l.startsWith("On ") &&
+          !l.startsWith("Von:") &&
+          !l.startsWith("From:") &&
+          !l.startsWith("Gesendet:") &&
+          !l.startsWith("Von meinem iPhone")
+        )[0];
 
-      if (!firstLine) {
-        msg.markRead();
+      if (!firstLine) return;
+
+      // Eigene Bot-Nachrichten sicher ausschließen
+      if (
+        firstLine.indexOf("🏍️") !== -1 ||
+        firstLine.indexOf("✅") !== -1 ||
+        firstLine.indexOf("Moppedtagebuch • 2-Tage-Check") !== -1 ||
+        firstLine.indexOf("Direkt im Moppedtagebuch gespeichert") !== -1
+      ) {
         return;
       }
 
       const parsed = parseReplyLine(firstLine);
       if (parsed && (parsed.km || parsed.addKm || parsed.amount)) {
-        const resultSummary = applyParsedEntry(parsed);
-        msg.markRead();
-
-        MailApp.sendEmail({
-          to: CONFIG.RECIPIENT_EMAIL,
-          subject: "✅ Moppedtagebuch aktualisiert: " + resultSummary,
-          htmlBody: `
-            <div style="font-family:-apple-system,sans-serif;padding:16px;background:#121212;color:#fff;border-radius:14px;border:1px solid #69BE28;max-width:460px;">
-              <h3 style="margin:0 0 8px 0;color:#69BE28;">✅ Eintrag gespeichert!</h3>
-              <p style="margin:0 0 12px 0;font-size:15px;">${resultSummary}</p>
-              <a href="${CONFIG.APP_URL}" style="color:#69BE28;font-weight:700;">Im Moppedtagebuch ansehen →</a>
-            </div>
-          `
+        userReplies.push({
+          msg: msg,
+          msgId: msg.getId(),
+          timestamp: msg.getDate().getTime(),
+          firstLine: firstLine,
+          parsed: parsed
         });
       }
     });
   });
+
+  if (!userReplies.length) {
+    Logger.log("ℹ️ Keine neuen E-Mail-Antworten gefunden.");
+    return;
+  }
+
+  // Sortiere absteigend nach exakter Sendezeit -> userReplies[0] ist garantiert deine ALLERNEUESTE Antwort!
+  userReplies.sort((a, b) => b.timestamp - a.timestamp);
+  const newest = userReplies[0];
+
+  const lastAppliedId = props.getProperty("LAST_APPLIED_REPLY_ID") || "";
+  const liveState = getCurrentBikeState();
+
+  // Prüfen, ob diese neueste Antwort schon verarbeitet wurde UND der KM-Stand in Firestore schon stimmt
+  const kmAlreadyInCloud = newest.parsed.km && String(liveState.currentKm) === String(newest.parsed.km);
+  if (newest.msgId === lastAppliedId && (kmAlreadyInCloud || !newest.parsed.km)) {
+    Logger.log("ℹ️ Neueste Antwort ('" + newest.firstLine + "') ist bereits in der Cloud aktiv (" + liveState.currentKm + " km).");
+    return;
+  }
+
+  Logger.log("📩 Wende neueste E-Mail-Antwort an: '" + newest.firstLine + "' vom " + newest.msg.getDate());
+  const res = applyParsedEntry(newest.parsed, liveState);
+  newest.msg.markRead();
+  props.setProperty("LAST_APPLIED_REPLY_ID", newest.msgId);
+
+  if (res.wroteDirectToFirestore && newest.msgId !== lastAppliedId) {
+    MailApp.sendEmail({
+      to: CONFIG.RECIPIENT_EMAIL,
+      name: "Mopped-Bot",
+      subject: "✅ Moppedtagebuch aktualisiert: " + res.summary,
+      htmlBody: `
+        <div style="font-family:-apple-system,sans-serif;padding:18px;background:#121212;color:#fff;border-radius:16px;border:1px solid #69BE28;max-width:460px;">
+          <h3 style="margin:0 0 8px 0;color:#69BE28;">✅ Direkt im Moppedtagebuch gespeichert!</h3>
+          <p style="margin:0 0 14px 0;font-size:15px;">${res.summary}</p>
+          <a href="${CONFIG.APP_URL}" style="display:inline-block;background:#69BE28;color:#000;padding:10px 16px;border-radius:99px;text-decoration:none;font-weight:700;">Im Moppedtagebuch öffnen →</a>
+        </div>
+      `
+    });
+  }
 }
 
 function parseReplyLine(line) {
-  const cleaned = line.trim();
+  const normalized = line.replace(/(\d{1,3})\.(\d{3})\b/g, "$1$2").trim();
   const result = {
     km: null,
     addKm: null,
@@ -205,12 +265,12 @@ function parseReplyLine(line) {
     date: Utilities.formatDate(new Date(), "Europe/Berlin", "yyyy-MM-dd")
   };
 
-  const addMatch = cleaned.match(/^\+\s*(\d{1,5})\b/);
+  const addMatch = normalized.match(/^\+\s*(\d{1,5})\b/);
   if (addMatch) {
     result.addKm = parseInt(addMatch[1], 10);
   }
 
-  const parts = cleaned.split(/[,;]/).map(s => s.trim()).filter(Boolean);
+  const parts = normalized.split(/[,;]/).map(s => s.trim()).filter(Boolean);
 
   if (parts.length >= 1 && !result.addKm) {
     const kmMatch = parts[0].match(/\b(\d{4,6})\b/);
@@ -219,7 +279,10 @@ function parseReplyLine(line) {
     }
   }
 
-  const restText = parts.length > 1 ? parts.slice(1).join(" ") : (result.km || result.addKm ? cleaned.replace(/^\+?\d+\s*(km)?/i, "").trim() : cleaned);
+  const restText = parts.length > 1
+    ? parts.slice(1).join(" ")
+    : (result.km || result.addKm ? normalized.replace(/^\+?\d+\s*(km)?/i, "").trim() : normalized);
+
   if (restText) {
     const amountMatch = restText.match(/(\d{1,4}(?:[.,]\d{1,2})?)\s*€?/);
     if (amountMatch) {
@@ -245,36 +308,24 @@ function parseReplyLine(line) {
   return result;
 }
 
-function applyParsedEntry(parsed) {
+function applyParsedEntry(parsed, currentState) {
   const props = PropertiesService.getScriptProperties();
-  const state = getCurrentBikeState();
-  let newKm = parseInt(state.currentKm || CONFIG.DEFAULT_KM, 10);
+  const state = currentState || getCurrentBikeState();
+  const oldKm = parseInt(state.currentKm || CONFIG.DEFAULT_KM, 10);
+  let newKm = oldKm;
 
   if (parsed.km) {
     newKm = parsed.km;
   } else if (parsed.addKm) {
-    newKm = newKm + parsed.addKm;
+    newKm = oldKm + parsed.addKm;
   }
 
-  const diff = newKm - parseInt(state.currentKm || CONFIG.DEFAULT_KM, 10);
+  const diff = newKm - oldKm;
   state.currentKm = String(newKm);
   state.lastUpdated = parsed.date;
   props.setProperty("BIKE_STATE", JSON.stringify(state));
 
   const wroteDirectToFirestore = writeEntryDirectlyToFirestore(newKm, parsed);
-
-  if (!wroteDirectToFirestore) {
-    const queueRaw = props.getProperty("PENDING_REPLIES") || "[]";
-    const queue = JSON.parse(queueRaw);
-    queue.push({
-      km: newKm,
-      amount: parsed.amount,
-      cat: parsed.cat,
-      desc: parsed.desc,
-      date: parsed.date
-    });
-    props.setProperty("PENDING_REPLIES", JSON.stringify(queue));
-  }
 
   const summary = [];
   if (parsed.km || parsed.addKm) {
@@ -283,7 +334,11 @@ function applyParsedEntry(parsed) {
   if (parsed.amount) {
     summary.push(`Ausgabe: € ${parsed.amount.toFixed(2)} (${parsed.desc || "Tanken"})`);
   }
-  return summary.join(" • ");
+  return {
+    summary: summary.join(" • "),
+    newKm: newKm,
+    wroteDirectToFirestore: wroteDirectToFirestore
+  };
 }
 
 function getCurrentBikeState() {
@@ -308,10 +363,10 @@ function getCurrentBikeState() {
       if (res.getResponseCode() === 200) {
         const doc = JSON.parse(res.getContentText());
         const f = doc.fields || {};
-        if (f.currentKm?.stringValue) saved.currentKm = f.currentKm.stringValue;
-        if (f.nextServiceDue?.stringValue) saved.nextServiceDue = f.nextServiceDue.stringValue;
-        if (f.licensePlate?.stringValue) saved.licensePlate = f.licensePlate.stringValue;
-        if (f.lastUpdated?.stringValue) saved.lastUpdated = f.lastUpdated.stringValue;
+        if (f.currentKm && f.currentKm.stringValue) saved.currentKm = f.currentKm.stringValue;
+        if (f.nextServiceDue && f.nextServiceDue.stringValue) saved.nextServiceDue = f.nextServiceDue.stringValue;
+        if (f.licensePlate && f.licensePlate.stringValue) saved.licensePlate = f.licensePlate.stringValue;
+        if (f.lastUpdated && f.lastUpdated.stringValue) saved.lastUpdated = f.lastUpdated.stringValue;
         props.setProperty("BIKE_STATE", JSON.stringify(saved));
       }
     } catch (e) {
@@ -337,13 +392,19 @@ function writeEntryDirectlyToFirestore(newKm, parsed) {
         lastUpdatedIso: { stringValue: new Date().toISOString() }
       }
     };
-    UrlFetchApp.fetch(techUrl, {
+    const patchRes = UrlFetchApp.fetch(techUrl, {
       method: "patch",
       contentType: "application/json",
       headers: { Authorization: "Bearer " + authData.idToken },
       payload: JSON.stringify(techPayload),
       muteHttpExceptions: true
     });
+
+    if (patchRes.getResponseCode() !== 200) {
+      Logger.log("❌ Firestore Patch Fehler: " + patchRes.getResponseCode() + " " + patchRes.getContentText());
+      return false;
+    }
+    Logger.log("✅ Firestore KM-Stand erfolgreich auf " + newKm + " km gesetzt!");
 
     if (parsed.amount && parsed.amount > 0) {
       const finUrl = `${baseUrl}/finance`;
@@ -372,7 +433,10 @@ function writeEntryDirectlyToFirestore(newKm, parsed) {
 }
 
 function getFirebaseAuth() {
-  if (!CONFIG.FIREBASE_PASSWORD) return null;
+  const props = PropertiesService.getScriptProperties();
+  const password = CONFIG.FIREBASE_PASSWORD || props.getProperty("SAVED_FIREBASE_PASSWORD") || "";
+  if (!password) return null;
+
   try {
     const url = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${CONFIG.FIREBASE_API_KEY}`;
     const res = UrlFetchApp.fetch(url, {
@@ -380,7 +444,7 @@ function getFirebaseAuth() {
       contentType: "application/json",
       payload: JSON.stringify({
         email: CONFIG.FIREBASE_EMAIL,
-        password: CONFIG.FIREBASE_PASSWORD,
+        password: password,
         returnSecureToken: true
       }),
       muteHttpExceptions: true
@@ -388,45 +452,11 @@ function getFirebaseAuth() {
     if (res.getResponseCode() === 200) {
       const data = JSON.parse(res.getContentText());
       return { idToken: data.idToken, uid: data.localId };
+    } else {
+      Logger.log("Firebase Login fehlgeschlagen: " + res.getContentText());
     }
   } catch (e) {
     Logger.log("Firebase Auth Fehler: " + e);
   }
   return null;
-}
-
-function doGet(e) {
-  const action = e?.parameter?.action || "status";
-  const props = PropertiesService.getScriptProperties();
-
-  if (action === "getPendingReplies") {
-    const replies = JSON.parse(props.getProperty("PENDING_REPLIES") || "[]");
-    return ContentService.createTextOutput(JSON.stringify({ replies }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-
-  return ContentService.createTextOutput(JSON.stringify(getCurrentBikeState()))
-    .setMimeType(ContentService.MimeType.JSON);
-}
-
-function doPost(e) {
-  const props = PropertiesService.getScriptProperties();
-  try {
-    const body = JSON.parse(e.postData.contents || "{}");
-    if (body.action === "ackReplies") {
-      props.setProperty("PENDING_REPLIES", "[]");
-    }
-    if (body.currentKm) {
-      const state = getCurrentBikeState();
-      state.currentKm = String(body.currentKm);
-      if (body.nextServiceDue) state.nextServiceDue = String(body.nextServiceDue);
-      if (body.lastUpdated) state.lastUpdated = String(body.lastUpdated);
-      props.setProperty("BIKE_STATE", JSON.stringify(state));
-    }
-    return ContentService.createTextOutput(JSON.stringify({ ok: true }))
-      .setMimeType(ContentService.MimeType.JSON);
-  } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({ ok: false, error: String(err) }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
 }

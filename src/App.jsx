@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
-import { Lock, Bike, Settings, DollarSign, Wrench, Package, Camera, Zap } from 'lucide-react';
+import { Lock, Bike, Settings, DollarSign, Wrench, Package, Camera, Zap, RefreshCw } from 'lucide-react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { useDocument, useCollection } from './hooks/useFirestore';
+import { useDocument, useCollection, triggerManualFirestoreRefresh } from './hooks/useFirestore';
 import Dashboard from './components/Dashboard';
 import TechnicalData from './components/TechnicalData';
 import Finance from './components/Finance';
@@ -71,7 +71,6 @@ function MainRouter() {
   if (isLocked) {
     const checkPin = (inputPin) => {
       if (inputPin === pin) {
-        // Auf diesem Gerät für 7 Tage merken (bis manuell auf Lock geklickt wird)
         localStorage.setItem('mopped_unlocked_until', String(Date.now() + 7 * 24 * 60 * 60 * 1000));
         setIsLocked(false);
         return true;
@@ -97,6 +96,7 @@ function MainLayout({ onLock }) {
 
   const [quickParams, setQuickParams] = useState(() => parseQuickUrlParams());
   const [isQuickModalOpen, setIsQuickModalOpen] = useState(() => Boolean(parseQuickUrlParams()));
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const clearUrlParams = () => {
     setQuickParams(null);
@@ -106,71 +106,21 @@ function MainLayout({ onLock }) {
     }
   };
 
-  // Optional: Sync pending email replies from Google Apps Script Bot if configured
+  // Alle 15 Sekunden im Vordergrund (besonders für iOS Home-Screen-App) live vom Server abgleichen
   useEffect(() => {
-    const webhookUrl = localStorage.getItem('mopped_bot_webhook_url');
-    if (!webhookUrl || !techData) return;
-
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(`${webhookUrl}?action=getPendingReplies`);
-        if (!res.ok) return;
-        const payload = await res.json();
-        if (cancelled || !payload?.replies?.length) return;
-
-        let latestKm = techData.currentKm;
-        let latestDate = techData.lastUpdated || new Date().toISOString().split('T')[0];
-
-        for (const item of payload.replies) {
-          const entryDate = item.date || new Date().toISOString().split('T')[0];
-          if (item.km) {
-            latestKm = String(item.km);
-            latestDate = entryDate;
-          } else if (item.addKm && latestKm) {
-            latestKm = String(parseInt(latestKm, 10) + parseInt(item.addKm, 10));
-            latestDate = entryDate;
-          }
-
-          if (item.amount && parseFloat(item.amount) > 0) {
-            await addFinanceEntry({
-              date: entryDate,
-              desc: item.desc || `Tanken${latestKm ? ` (${latestKm} km)` : ''}`,
-              amount: parseFloat(item.amount).toFixed(2),
-              cat: item.cat || 'Fuel',
-              km: latestKm || ''
-            });
-            latestDate = entryDate;
-          }
-        }
-
-        await updateTechData({
-          ...techData,
-          currentKm: latestKm,
-          lastUpdated: latestDate,
-          lastUpdatedIso: new Date().toISOString()
-        });
-
-        await fetch(webhookUrl, {
-          method: 'POST',
-          mode: 'no-cors',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'ackReplies',
-            currentKm: latestKm,
-            nextServiceDue: techData.nextServiceDue || '52000',
-            lastUpdated: latestDate
-          })
-        });
-      } catch {
-        // Silent fallback if bot URL is not reachable
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        triggerManualFirestoreRefresh();
       }
-    })();
+    }, 15000);
+    return () => clearInterval(interval);
+  }, []);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [techData?.currentKm]);
+  const handleManualSync = () => {
+    setIsRefreshing(true);
+    triggerManualFirestoreRefresh();
+    setTimeout(() => setIsRefreshing(false), 700);
+  };
 
   const navItems = [
     { path: '/', label: 'Übersicht', icon: <Bike size={24} /> },
@@ -183,9 +133,9 @@ function MainLayout({ onLock }) {
 
   return (
     <div className="app-container fade-in">
-      <header style={{ padding: '1rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 style={{ margin: 0, fontSize: '1.25rem', color: 'var(--kawasaki-green)' }}>Moppedtagebuch</h1>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+      <header style={{ padding: '1rem 1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h1 style={{ margin: 0, fontSize: '1.2rem', color: 'var(--kawasaki-green)' }}>Moppedtagebuch</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <button
             onClick={() => setIsQuickModalOpen(true)}
             style={{
@@ -193,8 +143,8 @@ function MainLayout({ onLock }) {
               border: '1px solid rgba(105, 190, 40, 0.4)',
               color: 'var(--kawasaki-green)',
               borderRadius: '999px',
-              padding: '6px 12px',
-              fontSize: '0.78rem',
+              padding: '6px 11px',
+              fontSize: '0.76rem',
               fontWeight: '700',
               display: 'flex',
               alignItems: 'center',
@@ -204,8 +154,25 @@ function MainLayout({ onLock }) {
           >
             <Zap size={14} /> Schnell-Check
           </button>
-          <button onClick={onLock} style={{ background: 'none', color: 'var(--text-secondary)' }} title="App sperren">
-            <Lock size={20} />
+          <button
+            onClick={handleManualSync}
+            style={{
+              background: 'rgba(255,255,255,0.07)',
+              border: '1px solid rgba(255,255,255,0.12)',
+              color: isRefreshing ? 'var(--kawasaki-green)' : 'var(--text-secondary)',
+              borderRadius: '50%',
+              width: '32px',
+              height: '32px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+            title="Jetzt mit Cloud synchronisieren"
+          >
+            <RefreshCw size={16} className={isRefreshing ? 'spin-icon' : ''} />
+          </button>
+          <button onClick={onLock} style={{ background: 'none', color: 'var(--text-secondary)', padding: '4px' }} title="App sperren">
+            <Lock size={19} />
           </button>
         </div>
       </header>
@@ -246,7 +213,6 @@ function MainLayout({ onLock }) {
           </button>
         ))}
       </nav>
-      {/* Scrollable nav styling */}
       <style>{`
         .scrollable-nav {
             overflow-x: auto;
@@ -254,7 +220,14 @@ function MainLayout({ onLock }) {
             padding: 0 0.5rem;
         }
         .nav-item {
-            min-width: 70px; /* Ensure 6 items fit or scroll */
+            min-width: 70px;
+        }
+        @keyframes spin360 {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .spin-icon {
+            animation: spin360 0.6s linear infinite;
         }
       `}</style>
     </div>
