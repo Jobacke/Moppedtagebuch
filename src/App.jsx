@@ -19,7 +19,7 @@ import BikeEmblem from './components/BikeEmblem';
 import { createPinRecord, verifyPin } from './utils/pin';
 import './index.css';
 
-const APP_VERSION = 'v1.19';
+const APP_VERSION = 'v1.20';
 
 function parseQuickUrlParams() {
   const params = new URLSearchParams(window.location.search);
