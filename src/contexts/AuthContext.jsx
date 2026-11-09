@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { auth } from '../firebase';
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
-import { Bike } from 'lucide-react';
+import BikeEmblem from '../components/BikeEmblem';
 
 const AuthContext = createContext();
 
@@ -51,9 +51,7 @@ export function AuthProvider({ children }) {
                 justifyContent: 'center',
                 color: 'var(--text-secondary)'
             }}>
-                <div className="brand-mark" style={{ width: 64, height: 64, borderRadius: 20, marginBottom: '1rem' }}>
-                    <Bike size={32} />
-                </div>
+                <div style={{ marginBottom: '1.4rem' }}><BikeEmblem size={170} state="pulse" /></div>
                 <p>Lade Moppedtagebuch...</p>
             </div>
         );

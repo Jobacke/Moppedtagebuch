@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Lock, Delete, KeyRound } from 'lucide-react';
+import { Delete } from 'lucide-react';
+import BikeEmblem from './BikeEmblem';
 import { getLockout, registerFailedAttempt, resetFailedAttempts } from '../utils/pin';
 
 /**
@@ -105,26 +106,20 @@ const PinLock = ({ mode = 'unlock', onUnlock, onSetPin }) => {
             justifyContent: 'center',
             alignItems: 'center',
             minHeight: '100dvh',
-            padding: '2rem 1rem'
+            padding: '1.5rem 1rem 2rem'
         }}>
-            <div className={`brand-mark ${shake ? 'shake' : ''}`} style={{
-                width: 72,
-                height: 72,
-                borderRadius: 24,
-                marginBottom: '1.25rem',
-                color: error ? 'var(--danger)' : 'var(--accent-contrast)'
-            }}>
-                {isSetup ? <KeyRound size={32} /> : <Lock size={32} />}
+            <div style={{ marginBottom: '1.1rem' }}>
+                <BikeEmblem size={160} state={shake ? 'error' : undefined} />
             </div>
             <h2 style={{ margin: '0 0 0.3rem', fontSize: '1.4rem' }}>Moppedtagebuch</h2>
             <p style={{ margin: '0 0 0.4rem', textAlign: 'center', color: error || lockedSeconds ? 'var(--danger)' : 'var(--text-secondary)' }} aria-live="polite">
                 {lockedSeconds ? title : (error || title)}
             </p>
-            <p style={{ margin: '0 0 1.8rem', minHeight: '1.2em', fontSize: '0.8rem', color: 'var(--text-tertiary)', textAlign: 'center', maxWidth: 300 }}>
+            <p style={{ margin: '0 0 1.4rem', minHeight: '1.2em', fontSize: '0.8rem', color: 'var(--text-tertiary)', textAlign: 'center', maxWidth: 300 }}>
                 {isSetup ? 'Der PIN wird verschlüsselt in deinem Konto gespeichert.' : ''}
             </p>
 
-            <div style={{ display: 'flex', gap: '1.1rem', marginBottom: '2.5rem' }} aria-label={`${pin.length} von 4 Ziffern`}>
+            <div style={{ display: 'flex', gap: '1.1rem', marginBottom: '2rem' }} aria-label={`${pin.length} von 4 Ziffern`}>
                 {[...Array(4)].map((_, i) => (
                     <div key={i} style={{
                         width: 14,

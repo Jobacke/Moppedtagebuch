@@ -15,10 +15,11 @@ import Login from './components/Login';
 import PinLock from './components/PinLock';
 import QuickEntryModal from './components/QuickEntryModal';
 import ErrorBoundary from './components/ErrorBoundary';
+import BikeEmblem from './components/BikeEmblem';
 import { createPinRecord, verifyPin } from './utils/pin';
 import './index.css';
 
-const APP_VERSION = 'v1.18';
+const APP_VERSION = 'v1.19';
 
 function parseQuickUrlParams() {
   const params = new URLSearchParams(window.location.search);
@@ -93,7 +94,7 @@ function PinGate() {
   if (loading && !security) {
     return (
       <div style={{ minHeight: '100dvh', display: 'grid', placeItems: 'center' }}>
-        <div className="brand-mark" style={{ width: 64, height: 64, borderRadius: 20 }}><Lock size={30} /></div>
+        <BikeEmblem size={170} state="pulse" />
       </div>
     );
   }

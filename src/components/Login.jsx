@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Bike } from 'lucide-react';
+import BikeEmblem from './BikeEmblem';
 
 export default function Login() {
     const emailRef = useRef();
@@ -38,8 +38,8 @@ export default function Login() {
         }}>
             <div className="paint-panel" style={{ width: '100%', maxWidth: 420, padding: '2rem 1.5rem' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-                    <div className="brand-mark" style={{ width: 72, height: 72, borderRadius: 24, marginBottom: '1.2rem' }}>
-                        <Bike size={36} />
+                    <div style={{ marginTop: '-0.5rem', marginBottom: '1.1rem' }}>
+                        <BikeEmblem size={210} />
                     </div>
                     <h2 style={{ margin: 0, fontSize: '1.6rem' }}>{isLogin ? 'Willkommen zurück' : 'Konto erstellen'}</h2>
                     <p style={{ margin: '0.35rem 0 1.6rem', color: 'var(--text-secondary)' }}>Dein Moppedtagebuch – synchron auf allen Geräten</p>

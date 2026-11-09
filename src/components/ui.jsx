@@ -106,3 +106,4 @@ export function DataError({ errors = [] }) {
         </div>
     );
 }
+
