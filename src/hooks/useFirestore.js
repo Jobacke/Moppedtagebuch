@@ -10,198 +10,226 @@ import {
     setDoc,
     orderBy,
     getDocFromServer,
-    getDocsFromServer,
-    getDoc,
-    getDocs
+    getDocsFromServer
 } from 'firebase/firestore';
 import { useAuth } from '../contexts/AuthContext';
+
+/*
+ * Gemeinsamer Daten-Store: pro Firestore-Pfad genau EIN Live-Listener, egal wie viele
+ * Komponenten die Daten nutzen. Manuelle Aktualisierungen laufen je Pfad nacheinander
+ * (nie parallel). Fehler werden nicht verschluckt, sondern als `error` weitergegeben.
+ */
+
+const entries = new Map();
+
+function getEntry(key) {
+    if (!entries.has(key)) {
+        entries.set(key, {
+            key,
+            data: undefined,
+            loading: true,
+            error: null,
+            subscribers: new Set(),
+            unsubscribe: null,
+            refreshing: null,
+            retryTimer: null
+        });
+    }
+    return entries.get(key);
+}
+
+function emit(entry) {
+    entry.subscribers.forEach((fn) => fn());
+}
+
+function setEntry(entry, patch) {
+    Object.assign(entry, patch);
+    emit(entry);
+}
+
+function readCollectionSnapshot(snapshot) {
+    const docs = [];
+    snapshot.forEach((d) => docs.push({ ...d.data(), id: d.id }));
+    return docs;
+}
+
+function startListener(entry, spec) {
+    if (entry.unsubscribe) return;
+    const onError = (err) => {
+        console.error(`Firestore-Fehler (${entry.key}):`, err);
+        if (entry.unsubscribe) {
+            entry.unsubscribe();
+            entry.unsubscribe = null;
+        }
+        setEntry(entry, { error: err, loading: false });
+        // Automatisch neu verbinden, solange jemand die Daten braucht
+        clearTimeout(entry.retryTimer);
+        entry.retryTimer = setTimeout(() => {
+            if (entry.subscribers.size) startListener(entry, spec);
+        }, 5000);
+    };
+
+    if (spec.kind === 'collection') {
+        const q = query(collection(db, spec.path), orderBy('date', 'desc'));
+        entry.unsubscribe = onSnapshot(
+            q,
+            (snapshot) => setEntry(entry, { data: readCollectionSnapshot(snapshot), loading: false, error: null }),
+            onError
+        );
+    } else {
+        entry.unsubscribe = onSnapshot(
+            doc(db, spec.path),
+            (snap) => setEntry(entry, { data: snap.exists() ? snap.data() : null, loading: false, error: null }),
+            onError
+        );
+    }
+}
+
+function stopListener(entry) {
+    clearTimeout(entry.retryTimer);
+    if (entry.unsubscribe) {
+        entry.unsubscribe();
+        entry.unsubscribe = null;
+    }
+}
+
+async function refreshEntry(entry, spec) {
+    if (entry.refreshing) return entry.refreshing;
+    entry.refreshing = (async () => {
+        try {
+            if (spec.kind === 'collection') {
+                const q = query(collection(db, spec.path), orderBy('date', 'desc'));
+                const snapshot = await getDocsFromServer(q);
+                setEntry(entry, { data: readCollectionSnapshot(snapshot), loading: false, error: null });
+            } else {
+                const snap = await getDocFromServer(doc(db, spec.path));
+                setEntry(entry, { data: snap.exists() ? snap.data() : null, loading: false, error: null });
+            }
+            // Listener nach einem Fehler wieder aufnehmen
+            if (!entry.unsubscribe && entry.subscribers.size) startListener(entry, spec);
+        } catch (err) {
+            // Offline o. Ä.: vorhandene Daten behalten, Listener liefert später nach
+            console.warn(`Aktualisierung fehlgeschlagen (${entry.key}):`, err?.code || err);
+            if (entry.data === undefined) setEntry(entry, { error: err, loading: false });
+        } finally {
+            entry.refreshing = null;
+        }
+    })();
+    return entry.refreshing;
+}
+
+function refreshAll() {
+    entries.forEach((entry) => {
+        if (entry.subscribers.size && entry.spec) refreshEntry(entry, entry.spec);
+    });
+}
+
+// Globale Auslöser – einmalig registriert statt pro Komponente
+let globalHandlersInstalled = false;
+function installGlobalHandlers() {
+    if (globalHandlersInstalled || typeof window === 'undefined') return;
+    globalHandlersInstalled = true;
+    let last = 0;
+    const throttled = () => {
+        const now = Date.now();
+        if (now - last < 3000) return;
+        last = now;
+        refreshAll();
+    };
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') throttled();
+    });
+    window.addEventListener('pageshow', throttled);
+    window.addEventListener('online', throttled);
+    window.addEventListener('mopped-force-refresh', throttled);
+}
 
 export function triggerManualFirestoreRefresh() {
     window.dispatchEvent(new CustomEvent('mopped-force-refresh'));
 }
 
-export function useCollection(collectionName) {
-    const [data, setData] = useState([]);
-    const { currentUser } = useAuth();
-    const [loading, setLoading] = useState(true);
-
-    const fetchFreshCollection = useCallback(async () => {
-        if (!currentUser) return;
-        const q = query(collection(db, `users/${currentUser.uid}/${collectionName}`), orderBy('date', 'desc'));
-        try {
-            const snapshot = await getDocsFromServer(q);
-            const docs = [];
-            snapshot.forEach(d => docs.push({ ...d.data(), id: d.id }));
-            setData(docs);
-            setLoading(false);
-        } catch {
-            try {
-                const snapshot = await getDocs(q);
-                const docs = [];
-                snapshot.forEach(d => docs.push({ ...d.data(), id: d.id }));
-                setData(docs);
-                setLoading(false);
-            } catch (e) {
-                console.warn('Collection fetch error:', e);
-            }
-        }
-    }, [currentUser, collectionName]);
+function useStoreEntry(spec) {
+    const key = spec ? `${spec.kind}:${spec.path}` : null;
+    const [, force] = useState(0);
 
     useEffect(() => {
-        if (!currentUser) {
-            setLoading(false);
-            return;
-        }
-
-        fetchFreshCollection();
-
-        const q = query(collection(db, `users/${currentUser.uid}/${collectionName}`), orderBy('date', 'desc'));
-        const unsubscribe = onSnapshot(
-            q,
-            { includeMetadataChanges: true },
-            (snapshot) => {
-                const docs = [];
-                snapshot.forEach(d => {
-                    docs.push({ ...d.data(), id: d.id });
-                });
-                setData(docs);
-                setLoading(false);
-            },
-            () => {
-                fetchFreshCollection();
-            }
-        );
-
-        const handleWakeUp = () => {
-            if (document.visibilityState === 'visible') {
-                fetchFreshCollection();
-            }
-        };
-
-        const handleManualRefresh = () => {
-            fetchFreshCollection();
-        };
-
-        document.addEventListener('visibilitychange', handleWakeUp);
-        window.addEventListener('focus', fetchFreshCollection);
-        window.addEventListener('pageshow', fetchFreshCollection);
-        window.addEventListener('online', fetchFreshCollection);
-        window.addEventListener('mopped-force-refresh', handleManualRefresh);
-
+        if (!spec) return undefined;
+        installGlobalHandlers();
+        const entry = getEntry(key);
+        entry.spec = spec;
+        const rerender = () => force((n) => n + 1);
+        entry.subscribers.add(rerender);
+        startListener(entry, spec);
+        rerender();
         return () => {
-            unsubscribe();
-            document.removeEventListener('visibilitychange', handleWakeUp);
-            window.removeEventListener('focus', fetchFreshCollection);
-            window.removeEventListener('pageshow', fetchFreshCollection);
-            window.removeEventListener('online', fetchFreshCollection);
-            window.removeEventListener('mopped-force-refresh', handleManualRefresh);
+            entry.subscribers.delete(rerender);
+            if (!entry.subscribers.size) {
+                // Kurz verzögert stoppen, damit Seitenwechsel keinen Neuaufbau auslöst
+                setTimeout(() => {
+                    if (!entry.subscribers.size) stopListener(entry);
+                }, 30000);
+            }
         };
-    }, [currentUser, collectionName, fetchFreshCollection]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [key]);
+
+    return key ? getEntry(key) : null;
+}
+
+export function useCollection(collectionName) {
+    const { currentUser } = useAuth();
+    const path = currentUser ? `users/${currentUser.uid}/${collectionName}` : null;
+    const entry = useStoreEntry(path ? { kind: 'collection', path } : null);
+
+    const refresh = useCallback(() => (entry ? refreshEntry(entry, entry.spec) : Promise.resolve()), [entry]);
 
     const add = async (item) => {
-        if (!currentUser) return;
-        await addDoc(collection(db, `users/${currentUser.uid}/${collectionName}`), item);
-        await fetchFreshCollection();
+        if (!path) return;
+        await addDoc(collection(db, path), item);
+        await refresh();
     };
 
     const remove = async (id) => {
-        if (!currentUser) return;
-        await deleteDoc(doc(db, `users/${currentUser.uid}/${collectionName}`, id));
-        await fetchFreshCollection();
+        if (!path) return;
+        await deleteDoc(doc(db, path, id));
+        await refresh();
     };
 
     const update = async (id, patch) => {
-        if (!currentUser || !id) return;
-        await setDoc(doc(db, `users/${currentUser.uid}/${collectionName}`, id), patch, { merge: true });
-        await fetchFreshCollection();
+        if (!path || !id) return;
+        await setDoc(doc(db, path, id), patch, { merge: true });
+        await refresh();
     };
 
-    return { data, add, remove, update, loading, refresh: fetchFreshCollection };
+    return {
+        data: entry?.data || [],
+        loading: currentUser ? (entry ? entry.loading : true) : false,
+        error: entry?.error || null,
+        add,
+        remove,
+        update,
+        refresh
+    };
 }
 
 export function useDocument(docName) {
-    const [data, setData] = useState(null);
     const { currentUser } = useAuth();
-    const [loading, setLoading] = useState(true);
+    const path = currentUser ? `users/${currentUser.uid}/data/${docName}` : null;
+    const entry = useStoreEntry(path ? { kind: 'doc', path } : null);
 
-    const fetchFreshDoc = useCallback(async () => {
-        if (!currentUser) return;
-        const docRef = doc(db, `users/${currentUser.uid}/data`, docName);
-        try {
-            const snap = await getDocFromServer(docRef);
-            if (snap.exists()) {
-                setData(snap.data());
-            }
-            setLoading(false);
-        } catch {
-            try {
-                const snap = await getDoc(docRef);
-                if (snap.exists()) {
-                    setData(snap.data());
-                }
-                setLoading(false);
-            } catch (e) {
-                console.warn('Doc fetch error:', e);
-            }
-        }
-    }, [currentUser, docName]);
+    const refresh = useCallback(() => (entry ? refreshEntry(entry, entry.spec) : Promise.resolve()), [entry]);
 
-    useEffect(() => {
-        if (!currentUser) {
-            setLoading(false);
-            return;
-        }
+    const update = useCallback(async (newData) => {
+        if (!path) return;
+        await setDoc(doc(db, path), newData, { merge: true });
+        await refresh();
+    }, [path, refresh]);
 
-        fetchFreshDoc();
-
-        const docRef = doc(db, `users/${currentUser.uid}/data`, docName);
-        const unsubscribe = onSnapshot(
-            docRef,
-            { includeMetadataChanges: true },
-            (docSnapshot) => {
-                if (docSnapshot.exists()) {
-                    setData(docSnapshot.data());
-                } else {
-                    setData(null);
-                }
-                setLoading(false);
-            },
-            () => {
-                fetchFreshDoc();
-            }
-        );
-
-        const handleWakeUp = () => {
-            if (document.visibilityState === 'visible') {
-                fetchFreshDoc();
-            }
-        };
-
-        const handleManualRefresh = () => {
-            fetchFreshDoc();
-        };
-
-        document.addEventListener('visibilitychange', handleWakeUp);
-        window.addEventListener('focus', fetchFreshDoc);
-        window.addEventListener('pageshow', fetchFreshDoc);
-        window.addEventListener('online', fetchFreshDoc);
-        window.addEventListener('mopped-force-refresh', handleManualRefresh);
-
-        return () => {
-            unsubscribe();
-            document.removeEventListener('visibilitychange', handleWakeUp);
-            window.removeEventListener('focus', fetchFreshDoc);
-            window.removeEventListener('pageshow', fetchFreshDoc);
-            window.removeEventListener('online', fetchFreshDoc);
-            window.removeEventListener('mopped-force-refresh', handleManualRefresh);
-        };
-    }, [currentUser, docName, fetchFreshDoc]);
-
-    const update = async (newData) => {
-        if (!currentUser) return;
-        await setDoc(doc(db, `users/${currentUser.uid}/data`, docName), newData, { merge: true });
-        await fetchFreshDoc();
+    return {
+        data: entry?.data ?? null,
+        loading: currentUser ? (entry ? entry.loading : true) : false,
+        error: entry?.error || null,
+        update,
+        refresh
     };
-
-    return { data, update, loading, refresh: fetchFreshDoc };
 }

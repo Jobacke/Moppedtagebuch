@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Plus, Trash2, Fuel, Wrench, Shield, Landmark, Cog, Receipt, Wallet } from 'lucide-react';
 import { useCollection } from '../hooks/useFirestore';
-import { Sheet, PageHeader, Field, EmptyState, LoadingBlock } from './ui';
+import { Sheet, PageHeader, Field, EmptyState, LoadingBlock, DataError } from './ui';
 import { todayIso, formatEuro, formatDate, formatMonth, formatKm, parseAmount } from '../utils/format';
 
 const CATEGORIES = [
@@ -17,7 +17,7 @@ const CAT = Object.fromEntries(CATEGORIES.map((c) => [c.value, c]));
 const emptyForm = () => ({ date: todayIso(), desc: '', amount: '', cat: 'Fuel', km: '' });
 
 const Finance = () => {
-    const { data: expenses, add, update, remove, loading } = useCollection('finance');
+    const { data: expenses, add, update, remove, loading, error: loadError } = useCollection('finance');
     const [year, setYear] = useState(String(new Date().getFullYear()));
     const [filter, setFilter] = useState('all');
     const [editing, setEditing] = useState(null); // null | 'new' | entry
@@ -110,6 +110,7 @@ const Finance = () => {
 
     return (
         <div className="fade-in">
+            <DataError errors={[loadError]} />
             <PageHeader
                 title="Kosten"
                 subtitle="Tanken, Wartung, Versicherung & mehr"

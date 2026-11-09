@@ -18,7 +18,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import { createPinRecord, verifyPin } from './utils/pin';
 import './index.css';
 
-const APP_VERSION = 'v1.16';
+const APP_VERSION = 'v1.17';
 
 function parseQuickUrlParams() {
   const params = new URLSearchParams(window.location.search);

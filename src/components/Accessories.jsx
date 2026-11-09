@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Package, Plus, Trash2, CheckCircle2, Clock } from 'lucide-react';
 import { useCollection } from '../hooks/useFirestore';
-import { Sheet, Field, EmptyState, LoadingBlock } from './ui';
+import { Sheet, Field, EmptyState, LoadingBlock, DataError } from './ui';
 import { todayIso, formatEuro, formatDate, parseAmount } from '../utils/format';
 
 const emptyForm = () => ({ name: '', brand: '', date: todayIso(), price: '', installed: true });
@@ -10,7 +10,7 @@ const emptyForm = () => ({ name: '', brand: '', date: todayIso(), price: '', ins
 const Accessories = () => {
     const location = useLocation();
     const navigate = useNavigate();
-    const { data: items, add, update, remove, loading } = useCollection('accessories');
+    const { data: items, add, update, remove, loading, error: loadError } = useCollection('accessories');
     const [editing, setEditing] = useState(null);
     const [form, setForm] = useState(emptyForm);
     const [saving, setSaving] = useState(false);
@@ -74,6 +74,7 @@ const Accessories = () => {
 
     return (
         <div className="fade-in">
+            <DataError errors={[loadError]} />
             <div className="card-grid" style={{ marginBottom: '1rem' }}>
                 <div className="surface">
                     <div className="stat-label">Wert gesamt</div>

@@ -8,7 +8,7 @@ import {
     computeCurrentKm, computeServiceStatus, serviceHeadline, STATUS_CLASS,
     formatKm, formatNumber, formatEuro, formatDate, relativeDay, parseAmount, toDate
 } from '../utils/format';
-import { LoadingBlock } from './ui';
+import { LoadingBlock, DataError } from './ui';
 
 const CATEGORY_ICON = {
     Fuel: <Fuel size={18} />,
@@ -21,9 +21,10 @@ const CATEGORY_ICON = {
 
 const Dashboard = ({ onOpenQuickEntry, onNavigate }) => {
     const { data: techData, update: updateTechData, loading: techLoading } = useDocument('technical_data');
-    const { data: financeData } = useCollection('finance');
-    const { data: serviceData } = useCollection('service');
-    const { data: accessoriesData } = useCollection('accessories');
+    const { data: financeData, error: financeError, loading: financeLoading } = useCollection('finance');
+    const { data: serviceData, error: serviceError, loading: serviceLoading } = useCollection('service');
+    const { data: accessoriesData, error: accError, loading: accLoading } = useCollection('accessories');
+    const listsLoading = financeLoading || serviceLoading || accLoading;
 
     const techKmNum = parseInt(String(techData?.currentKm || '0').replace(/\D/g, ''), 10) || 0;
     const currentKm = computeCurrentKm(techData, serviceData, financeData);
@@ -90,6 +91,7 @@ const Dashboard = ({ onOpenQuickEntry, onNavigate }) => {
 
     return (
         <div className="fade-in">
+            <DataError errors={[financeError, serviceError, accError]} />
             {/* Maschine – Lack-Panel */}
             <section className="paint-panel" style={{ marginTop: '0.5rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
@@ -164,10 +166,10 @@ const Dashboard = ({ onOpenQuickEntry, onNavigate }) => {
                         <span className="stat-label">Kosten {thisYear}</span>
                         <Wallet size={16} color="var(--text-secondary)" />
                     </div>
-                    <div className="stat-value" style={{ marginTop: 8, fontSize: '1.2rem' }}>{formatEuro(costs.year, 0)}</div>
-                    <div className="stat-sub" style={{ marginTop: 8 }}>Gesamt {formatEuro(costs.total, 0)}</div>
+                    <div className="stat-value" style={{ marginTop: 8, fontSize: '1.2rem' }}>{listsLoading ? '…' : formatEuro(costs.year, 0)}</div>
+                    <div className="stat-sub" style={{ marginTop: 8 }}>Gesamt {listsLoading ? '…' : formatEuro(costs.total, 0)}</div>
                     <div className="stat-sub" style={{ marginTop: 2 }}>
-                        {lastFuel ? `Tanken ${formatDate(lastFuel.date, { day: '2-digit', month: '2-digit' })} · ${formatEuro(lastFuel.amount)}` : 'Noch kein Tankstopp'}
+                        {listsLoading ? 'Lade …' : lastFuel ? `Tanken ${formatDate(lastFuel.date, { day: '2-digit', month: '2-digit' })} · ${formatEuro(lastFuel.amount)}` : 'Noch kein Tankstopp'}
                     </div>
                 </button>
             </div>

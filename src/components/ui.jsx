@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
-import { X } from 'lucide-react';
+import { X, CloudOff } from 'lucide-react';
+import { triggerManualFirestoreRefresh } from '../hooks/useFirestore';
 
 /** Bottom-Sheet im iOS-Stil. Schließt per Hintergrund-Tipp, X oder Escape. */
 export function Sheet({ open, onClose, title, subtitle, icon, children }) {
@@ -85,6 +86,23 @@ export function LoadingBlock({ rows = 3 }) {
             {Array.from({ length: rows }).map((_, i) => (
                 <div key={i} className="skeleton" style={{ height: 60 }} />
             ))}
+        </div>
+    );
+}
+
+/** Sichtbarer Hinweis, wenn Daten nicht geladen werden konnten – statt stiller „0“. */
+export function DataError({ errors = [] }) {
+    const err = errors.find(Boolean);
+    if (!err) return null;
+    return (
+        <div className="status-pill status-danger" role="alert"
+            style={{ display: 'flex', alignItems: 'flex-start', gap: 10, borderRadius: 16, padding: '12px 14px', margin: '0.5rem 0 0.75rem', fontWeight: 500 }}>
+            <CloudOff size={18} style={{ flexShrink: 0, marginTop: 2 }} />
+            <span style={{ flex: 1 }}>
+                Daten konnten nicht geladen werden – angezeigte Werte sind unvollständig.
+                <span style={{ display: 'block', fontSize: '0.75rem', opacity: 0.8, marginTop: 2 }}>Fehler: {err.code || err.message || String(err)}</span>
+            </span>
+            <button type="button" className="link-btn" style={{ color: 'inherit', padding: 0 }} onClick={triggerManualFirestoreRefresh}>Erneut</button>
         </div>
     );
 }

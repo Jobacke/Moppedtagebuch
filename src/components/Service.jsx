@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Plus, Trash2, Wrench, CalendarClock, Gauge, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { useCollection, useDocument } from '../hooks/useFirestore';
-import { Sheet, PageHeader, Field, EmptyState, LoadingBlock } from './ui';
+import { Sheet, PageHeader, Field, EmptyState, LoadingBlock, DataError } from './ui';
 import {
     todayIso, computeCurrentKm, computeServiceStatus, serviceHeadline, STATUS_CLASS,
     formatKm, formatEuro, formatDate, parseKm, parseAmount, relativeDay
@@ -13,7 +13,7 @@ const emptyForm = (km) => ({ date: todayIso(), km: km ? String(km) : '', work: '
 const Service = () => {
     const location = useLocation();
     const navigate = useNavigate();
-    const { data: logs, add, update, remove, loading } = useCollection('service');
+    const { data: logs, add, update, remove, loading, error: loadError } = useCollection('service');
     const { data: techData, update: updateTechData } = useDocument('technical_data');
     const [editing, setEditing] = useState(null);
     const [form, setForm] = useState(() => emptyForm());
@@ -96,6 +96,7 @@ const Service = () => {
 
     return (
         <div className="fade-in">
+            <DataError errors={[loadError]} />
             <PageHeader
                 title="Service"
                 subtitle="Digitales Scheckheft"
