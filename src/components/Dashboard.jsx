@@ -1,190 +1,216 @@
-import React, { useEffect } from 'react';
-import { Settings, DollarSign, Wrench, Package, CheckCircle2, AlertTriangle } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useMemo } from 'react';
+import {
+    Wrench, Wallet, Package, Fuel, CheckCircle2, AlertTriangle, ChevronRight,
+    Gauge, Camera, Shield, Landmark, Cog, Receipt
+} from 'lucide-react';
 import { useDocument, useCollection } from '../hooks/useFirestore';
+import {
+    computeCurrentKm, computeServiceStatus, serviceHeadline, STATUS_CLASS,
+    formatKm, formatNumber, formatEuro, formatDate, relativeDay, parseAmount, toDate
+} from '../utils/format';
+import { LoadingBlock } from './ui';
 
-const Dashboard = ({ onOpenQuickEntry }) => {
-    const navigate = useNavigate();
+const CATEGORY_ICON = {
+    Fuel: <Fuel size={18} />,
+    Service: <Wrench size={18} />,
+    Insurance: <Shield size={18} />,
+    Tax: <Landmark size={18} />,
+    Parts: <Cog size={18} />,
+    Other: <Receipt size={18} />
+};
 
-    // Fetch data
-    const { data: techData, update: updateTechData } = useDocument('technical_data');
+const Dashboard = ({ onOpenQuickEntry, onNavigate }) => {
+    const { data: techData, update: updateTechData, loading: techLoading } = useDocument('technical_data');
     const { data: financeData } = useCollection('finance');
     const { data: serviceData } = useCollection('service');
     const { data: accessoriesData } = useCollection('accessories');
 
-    // Calculate highest KM stand across technical_data, service, and finance
     const techKmNum = parseInt(String(techData?.currentKm || '0').replace(/\D/g, ''), 10) || 0;
-    const maxServiceKm = (serviceData || []).reduce((max, item) => {
-        const val = parseInt(String(item.km || '0').replace(/\D/g, ''), 10) || 0;
-        return val > max ? val : max;
-    }, 0);
-    const maxFinanceKm = (financeData || []).reduce((max, item) => {
-        const val = parseInt(String(item.km || '0').replace(/\D/g, ''), 10) || 0;
-        return val > max ? val : max;
-    }, 0);
+    const currentKm = computeCurrentKm(techData, serviceData, financeData);
 
-    const bestKmNum = Math.max(techKmNum, maxServiceKm, maxFinanceKm);
-    const totalKm = bestKmNum > 0 ? String(bestKmNum) : (techData?.currentKm || '---');
-    const nextService = techData?.nextServiceDue || '---';
-
-    // Auto-heal technical_data if a higher KM stand was entered in Service or Finance
+    // Auto-Heal: höherer KM-Stand aus Service/Finanzen → Technik-Daten nachziehen
     useEffect(() => {
-        if (techData && bestKmNum > techKmNum) {
-            updateTechData({
-                ...techData,
-                currentKm: String(bestKmNum)
-            });
+        if (techData && currentKm > techKmNum) {
+            updateTechData({ ...techData, currentKm: String(currentKm) });
         }
-    }, [bestKmNum, techKmNum, techData, updateTechData]);
+    }, [currentKm, techKmNum, techData, updateTechData]);
 
-    // Calculate generic expenses
-    const financeTotal = financeData?.reduce((sum, item) => sum + parseFloat(item.amount || 0), 0) || 0;
-    const serviceTotal = serviceData?.reduce((sum, item) => sum + parseFloat(item.cost || 0), 0) || 0;
-    const accTotal = accessoriesData?.reduce((sum, item) => sum + parseFloat(item.price || 0), 0) || 0;
+    const service = computeServiceStatus(techData, serviceData, currentKm);
 
-    const totalExpenses = financeTotal + serviceTotal + accTotal;
+    // Kosten
+    const thisYear = String(new Date().getFullYear());
+    const costs = useMemo(() => {
+        const all = [
+            ...(financeData || []).map((d) => ({ date: d.date, amount: parseAmount(d.amount) })),
+            ...(serviceData || []).map((d) => ({ date: d.date, amount: parseAmount(d.cost) })),
+            ...(accessoriesData || []).map((d) => ({ date: d.date, amount: parseAmount(d.price) }))
+        ];
+        const total = all.reduce((s, x) => s + x.amount, 0);
+        const year = all.filter((x) => String(x.date || '').startsWith(thisYear)).reduce((s, x) => s + x.amount, 0);
+        return { total, year };
+    }, [financeData, serviceData, accessoriesData, thisYear]);
 
-    // Determine last ride / last entry date (for 2-day reminder rhythm)
-    const allDates = [
-        techData?.lastUpdated,
-        ...(financeData || []).map(d => d.date),
-        ...(serviceData || []).map(d => d.date),
-        ...(accessoriesData || []).map(d => d.date)
-    ].filter(Boolean).sort().reverse();
+    const lastFuel = (financeData || []).find((d) => d.cat === 'Fuel');
 
-    const lastDateRaw = allDates[0] || null;
-    let daysSinceLastUpdate = null;
-    let lastActivityFormatted = 'Noch kein Datum';
+    // Letzte Aktivitäten (gemischt)
+    const recent = useMemo(() => {
+        const items = [
+            ...(financeData || []).map((d) => ({
+                id: `f-${d.id}`, date: d.date, title: d.desc || 'Ausgabe', path: '/finance',
+                icon: CATEGORY_ICON[d.cat] || CATEGORY_ICON.Other, value: formatEuro(d.amount)
+            })),
+            ...(serviceData || []).map((d) => ({
+                id: `s-${d.id}`, date: d.date, title: d.work || 'Service', path: '/service',
+                icon: <Wrench size={18} />, value: d.cost ? formatEuro(d.cost) : formatKm(d.km)
+            })),
+            ...(accessoriesData || []).map((d) => ({
+                id: `a-${d.id}`, date: d.date, title: d.name || 'Zubehör', path: '/accessories',
+                icon: <Package size={18} />, value: formatEuro(d.price)
+            }))
+        ].filter((x) => x.date);
+        return items.sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 5);
+    }, [financeData, serviceData, accessoriesData]);
 
-    if (lastDateRaw) {
-        const parsed = new Date(lastDateRaw);
-        if (!isNaN(parsed.getTime())) {
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            const entryDay = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
-            daysSinceLastUpdate = Math.max(0, Math.round((today - entryDay) / (1000 * 60 * 60 * 24)));
-            lastActivityFormatted = parsed.toLocaleDateString('de-DE');
-        }
+    // Täglicher KM-Check
+    const allDates = [techData?.lastUpdated, ...recent.map((r) => r.date)].filter(Boolean).sort().reverse();
+    const lastDate = toDate(allDates[0]);
+    let daysSince = null;
+    if (lastDate) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        daysSince = Math.max(0, Math.round((today - lastDate) / 86400000));
     }
+    const checkDue = daysSince === null || daysSince >= 1;
 
-    const isDueForTwoDayCheck = daysSinceLastUpdate === null || daysSinceLastUpdate >= 1;
+    if (techLoading && !techData) return <LoadingBlock rows={4} />;
 
-    const cards = [
-        { title: 'Technik', icon: <Settings size={32} />, path: '/tech', color: 'rgba(59, 130, 246, 0.2)' },
-        { title: 'Finanzen', icon: <DollarSign size={32} />, path: '/finance', color: 'rgba(16, 185, 129, 0.2)' },
-        { title: 'Service', icon: <Wrench size={32} />, path: '/service', color: 'rgba(245, 158, 11, 0.2)' },
-        { title: 'Zubehör', icon: <Package size={32} />, path: '/accessories', color: 'rgba(239, 68, 68, 0.2)' },
-    ];
+    const manufacturer = techData?.manufacturer || 'Kawasaki';
+    const model = techData?.model || 'Versys 1000 SE';
+    const plate = techData?.licensePlate || 'M-N 594';
 
     return (
-        <div className="dashboard fade-in">
-            <div className="hero-section" style={{
-                marginTop: '1rem',
-                marginBottom: '2rem',
-                textAlign: 'center',
-                padding: '2rem 1.5rem 1.5rem 1.5rem',
-                background: 'linear-gradient(135deg, rgba(105, 190, 40, 0.12), rgba(0, 0, 0, 0))',
-                borderRadius: '24px',
-                border: '1px solid rgba(105, 190, 40, 0.3)'
-            }}>
-                <h2 style={{ fontSize: '2rem', margin: '0 0 0.5rem 0', color: 'var(--text-primary)' }}>Versys 1000 SE</h2>
-                <span style={{
-                    background: 'var(--kawasaki-green)',
-                    color: '#000',
-                    padding: '4px 12px',
-                    borderRadius: '12px',
-                    fontWeight: 'bold',
-                    fontSize: '0.9rem'
-                }}>{techData?.licensePlate || 'M-N 594'}</span>
-
-                <div className="quick-stats" style={{
-                    display: 'flex',
-                    justifyContent: 'space-around',
-                    marginTop: '2rem',
-                    flexWrap: 'wrap',
-                    gap: '1rem'
-                }}>
-                    <div className="stat-item" onClick={onOpenQuickEntry} style={{ cursor: 'pointer' }} title="Klicken zum Aktualisieren">
-                        <span style={{ display: 'block', fontSize: '1.5rem', fontWeight: 'bold' }}>{totalKm}</span>
-                        <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>KM Stand</span>
+        <div className="fade-in">
+            {/* Maschine – Lack-Panel */}
+            <section className="paint-panel" style={{ marginTop: '0.5rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
+                    <div style={{ minWidth: 0 }}>
+                        <div className="stat-label">{manufacturer}</div>
+                        <h2 style={{ margin: '2px 0 0', fontSize: '1.55rem', fontWeight: 800, lineHeight: 1.15 }}>{model}</h2>
                     </div>
-                    <div className="stat-item">
-                        <span style={{ display: 'block', fontSize: '1.5rem', fontWeight: 'bold' }}>{nextService}</span>
-                        <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Nächster Service</span>
-                    </div>
-                    <div className="stat-item">
-                        <span style={{ display: 'block', fontSize: '1.5rem', fontWeight: 'bold' }}>€ {totalExpenses.toFixed(0)}</span>
-                        <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Gesamtkosten</span>
+                    <div className="plate" aria-label={`Kennzeichen ${plate}`}>
+                        <span className="plate-eu">D</span>
+                        <span className="plate-text">{plate}</span>
                     </div>
                 </div>
 
-                {/* Check Status */}
-                <div style={{
-                    marginTop: '1.5rem',
-                    paddingTop: '1rem',
-                    borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-                    display: 'flex',
-                    flexDirection: 'column'
-                }}>
-                    <div style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '6px',
-                        fontSize: '0.82rem',
-                        color: isDueForTwoDayCheck ? '#fbbf24' : 'var(--kawasaki-green)'
-                    }}>
-                        {isDueForTwoDayCheck ? (
-                            <>
-                                <AlertTriangle size={15} />
-                                <span>
-                                    {daysSinceLastUpdate === null
-                                        ? 'Täglicher Check aktiv: Jetzt ersten Schnell-Check starten'
-                                        : `Letzter Eintrag vor ${daysSinceLastUpdate} Tagen (${lastActivityFormatted}) – KM-Update fällig!`}
-                                </span>
-                            </>
-                        ) : (
-                            <>
-                                <CheckCircle2 size={15} />
-                                <span>
-                                    {daysSinceLastUpdate === 0
-                                        ? 'Heute bereits aktualisiert – gute Fahrt!'
-                                        : `Gestern aktualisiert (${lastActivityFormatted})`}
-                                </span>
-                            </>
-                        )}
+                <button
+                    type="button"
+                    onClick={onOpenQuickEntry}
+                    style={{ display: 'block', width: '100%', textAlign: 'left', marginTop: '1.4rem', padding: 0 }}
+                    aria-label="KM-Stand aktualisieren"
+                >
+                    <div className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Gauge size={14} /> Kilometerstand
                     </div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.4rem', marginTop: 2 }}>
+                        <span className="num" style={{
+                            fontFamily: 'var(--font-display)', fontSize: '3rem', fontWeight: 800, letterSpacing: '-0.035em', lineHeight: 1,
+                            background: 'linear-gradient(180deg, #ffffff 0%, #c4cad1 100%)', WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent'
+                        }}>
+                            {currentKm ? formatNumber(currentKm) : '–'}
+                        </span>
+                        <span style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-secondary)' }}>km</span>
+                    </div>
+                </button>
+
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginTop: '1rem', flexWrap: 'wrap' }}>
+                    <span className={`status-pill ${checkDue ? 'status-warn' : 'status-ok'}`}>
+                        {checkDue ? <AlertTriangle size={14} /> : <CheckCircle2 size={14} />}
+                        {daysSince === null
+                            ? 'Noch kein Eintrag'
+                            : daysSince === 0
+                                ? 'Heute aktualisiert'
+                                : `Zuletzt ${relativeDay(allDates[0])}`}
+                    </span>
+                    <button type="button" className="btn-primary" onClick={onOpenQuickEntry} style={{ minHeight: 40, padding: '0 1rem' }}>
+                        <Gauge size={16} /> KM eintragen
+                    </button>
                 </div>
+            </section>
+
+            {/* Status-Kacheln */}
+            <div className="card-grid" style={{ marginTop: '0.75rem' }}>
+                <button type="button" className="surface surface-tappable" onClick={() => onNavigate('/service')} style={{ textAlign: 'left' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span className="stat-label">Service</span>
+                        <Wrench size={16} color="var(--text-secondary)" />
+                    </div>
+                    <div className="stat-value" style={{ marginTop: 8, fontSize: '1.2rem', color: service.level === 'danger' ? 'var(--danger)' : service.level === 'warn' ? 'var(--warn)' : 'var(--text-primary)' }}>
+                        {serviceHeadline(service)}
+                    </div>
+                    {service.progress !== null && (
+                        <div className={`progress ${service.level === 'danger' ? 'danger' : service.level === 'warn' ? 'warn' : ''}`} style={{ marginTop: 10 }}>
+                            <span style={{ width: `${Math.round(service.progress * 100)}%` }} />
+                        </div>
+                    )}
+                    <div className="stat-sub" style={{ marginTop: 8 }}>
+                        {service.nextKm ? `bei ${formatKm(service.nextKm)}` : 'Intervall festlegen'}
+                        {service.nextDate ? ` · bis ${formatDate(service.nextDate)}` : ''}
+                    </div>
+                </button>
+
+                <button type="button" className="surface surface-tappable" onClick={() => onNavigate('/finance')} style={{ textAlign: 'left' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span className="stat-label">Kosten {thisYear}</span>
+                        <Wallet size={16} color="var(--text-secondary)" />
+                    </div>
+                    <div className="stat-value" style={{ marginTop: 8, fontSize: '1.2rem' }}>{formatEuro(costs.year, 0)}</div>
+                    <div className="stat-sub" style={{ marginTop: 8 }}>Gesamt {formatEuro(costs.total, 0)}</div>
+                    <div className="stat-sub" style={{ marginTop: 2 }}>
+                        {lastFuel ? `Tanken ${formatDate(lastFuel.date, { day: '2-digit', month: '2-digit' })} · ${formatEuro(lastFuel.amount)}` : 'Noch kein Tankstopp'}
+                    </div>
+                </button>
             </div>
 
-            <h3 className="section-title">Bereiche</h3>
-            <div className="card-grid">
-                {cards.map((card) => (
-                    <div
-                        key={card.title}
-                        className="glass-panel"
-                        onClick={() => navigate(card.path)}
-                        style={{
-                            cursor: 'pointer',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            aspectRatio: '1/1',
-                            gap: '1rem',
-                            transition: 'transform 0.2s, background 0.2s',
-                            background: `linear-gradient(135deg, ${card.color}, rgba(30,30,30,0.4))`
-                        }}
-                        onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
-                        onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
-                    >
-                        <div style={{ padding: '12px', background: 'rgba(255,255,255,0.1)', borderRadius: '50%' }}>
-                            {card.icon}
-                        </div>
-                        <span style={{ fontWeight: '600' }}>{card.title}</span>
-                    </div>
+            {/* Schnellzugriff */}
+            <h3 className="section-title">Schnell erfassen</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.5rem' }}>
+                {[
+                    { label: 'Tanken', icon: <Fuel size={20} />, onClick: onOpenQuickEntry },
+                    { label: 'Service', icon: <Wrench size={20} />, onClick: () => onNavigate('/service', { state: { openNew: true } }) },
+                    { label: 'Zubehör', icon: <Package size={20} />, onClick: () => onNavigate('/accessories', { state: { openNew: true } }) },
+                    { label: 'Foto', icon: <Camera size={20} />, onClick: () => onNavigate('/gallery') }
+                ].map((a) => (
+                    <button key={a.label} type="button" className="surface surface-tappable" onClick={a.onClick}
+                        style={{ padding: '0.85rem 0.25rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, fontSize: '0.8rem', fontWeight: 600 }}>
+                        <span className="icon-bubble" style={{ width: 38, height: 38 }}>{a.icon}</span>
+                        {a.label}
+                    </button>
                 ))}
             </div>
+
+            {/* Letzte Einträge */}
+            <div className="section-title-row">
+                <h3 className="section-title">Zuletzt</h3>
+                <button type="button" className="link-btn" onClick={() => onNavigate('/finance')}>Alle Kosten</button>
+            </div>
+            {recent.length === 0 ? (
+                <div className="empty-state">Noch keine Einträge – starte mit dem ersten KM-Check.</div>
+            ) : (
+                <div className="list">
+                    {recent.map((r) => (
+                        <button key={r.id} type="button" className="list-row" onClick={() => onNavigate(r.path)}>
+                            <span className="icon-bubble">{r.icon}</span>
+                            <span className="list-row-main">
+                                <span className="list-row-title" style={{ display: 'block' }}>{r.title}</span>
+                                <span className="list-row-sub" style={{ display: 'block' }}>{formatDate(r.date)}</span>
+                            </span>
+                            <span className="list-row-value">{r.value}</span>
+                            <ChevronRight size={16} color="var(--text-tertiary)" />
+                        </button>
+                    ))}
+                </div>
+            )}
         </div>
     );
 };

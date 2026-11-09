@@ -49,11 +49,10 @@ export function AuthProvider({ children }) {
                 flexDirection: 'column',
                 alignItems: 'center',
                 justifyContent: 'center',
-                background: '#121212',
-                color: 'var(--kawasaki-green)'
+                color: 'var(--text-secondary)'
             }}>
-                <div className="shake" style={{ marginBottom: '1rem' }}>
-                    <Bike size={48} />
+                <div className="brand-mark" style={{ width: 64, height: 64, borderRadius: 20, marginBottom: '1rem' }}>
+                    <Bike size={32} />
                 </div>
                 <p>Lade Moppedtagebuch...</p>
             </div>

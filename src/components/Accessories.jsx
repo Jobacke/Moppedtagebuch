@@ -1,113 +1,160 @@
-import React, { useState } from 'react';
-import { Package, Plus, Trash2 } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { Package, Plus, Trash2, CheckCircle2, Clock } from 'lucide-react';
 import { useCollection } from '../hooks/useFirestore';
+import { Sheet, Field, EmptyState, LoadingBlock } from './ui';
+import { todayIso, formatEuro, formatDate, parseAmount } from '../utils/format';
+
+const emptyForm = () => ({ name: '', brand: '', date: todayIso(), price: '', installed: true });
 
 const Accessories = () => {
-    const { data: items, add, remove, loading } = useCollection('accessories');
-    const [showForm, setShowForm] = useState(false);
-    const [newItem, setNewItem] = useState({ name: '', brand: '', date: '', price: '', installed: true });
+    const location = useLocation();
+    const navigate = useNavigate();
+    const { data: items, add, update, remove, loading } = useCollection('accessories');
+    const [editing, setEditing] = useState(null);
+    const [form, setForm] = useState(emptyForm);
+    const [saving, setSaving] = useState(false);
 
-    const handleAdd = async (e) => {
-        e.preventDefault();
-        if (!newItem.name || !newItem.price) return;
-
-        await add(newItem);
-
-        setNewItem({ name: '', brand: '', date: '', price: '', installed: true });
-        setShowForm(false);
+    const openNew = () => {
+        setForm(emptyForm());
+        setEditing('new');
     };
 
-    const handleDelete = async (id) => {
-        if (confirm('Zubehör entfernen?')) {
-            await remove(id);
+    useEffect(() => {
+        if (location.state?.openNew && !loading) {
+            openNew();
+            navigate(location.pathname, { replace: true, state: null });
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [location.state, loading]);
+
+    const openEdit = (item) => {
+        setForm({
+            name: item.name || '',
+            brand: item.brand || '',
+            date: item.date || '',
+            price: item.price ? String(item.price).replace('.', ',') : '',
+            installed: item.installed !== false
+        });
+        setEditing(item);
+    };
+
+    const handleSave = async (e) => {
+        e.preventDefault();
+        const price = parseAmount(form.price);
+        if (!form.name.trim()) return;
+        setSaving(true);
+        const payload = {
+            name: form.name.trim(),
+            brand: form.brand.trim(),
+            date: form.date,
+            price: price ? price.toFixed(2) : '0.00',
+            installed: form.installed
+        };
+        try {
+            if (editing === 'new') await add(payload);
+            else await update(editing.id, payload);
+            setEditing(null);
+        } finally {
+            setSaving(false);
         }
     };
 
-    const totalValue = items ? items.reduce((sum, item) => sum + parseFloat(item.price || 0), 0) : 0;
+    const handleDelete = async () => {
+        if (editing && editing !== 'new' && confirm('Dieses Zubehör wirklich entfernen?')) {
+            await remove(editing.id);
+            setEditing(null);
+        }
+    };
 
-    if (loading) return <div className="loading">Laden...</div>;
+    if (loading) return <LoadingBlock />;
+
+    const totalValue = (items || []).reduce((sum, item) => sum + parseAmount(item.price), 0);
+    const installedCount = (items || []).filter((i) => i.installed !== false).length;
 
     return (
-        <div className="section-container fade-in">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-                <h2 className="section-title">Zubehör</h2>
-                <div style={{ background: 'rgba(59, 130, 246, 0.2)', padding: '8px 16px', borderRadius: '12px' }}>
-                    <span style={{ color: '#60a5fa', fontWeight: 'bold' }}>€ {totalValue.toFixed(2)}</span>
+        <div className="fade-in">
+            <div className="card-grid" style={{ marginBottom: '1rem' }}>
+                <div className="surface">
+                    <div className="stat-label">Wert gesamt</div>
+                    <div className="stat-value" style={{ marginTop: 6 }}>{formatEuro(totalValue, 0)}</div>
+                </div>
+                <div className="surface">
+                    <div className="stat-label">Teile</div>
+                    <div className="stat-value" style={{ marginTop: 6 }}>{items.length}</div>
+                    <div className="stat-sub">{installedCount} montiert</div>
                 </div>
             </div>
 
-            <button className="primary-btn" onClick={() => setShowForm(!showForm)} style={{ marginBottom: '1.5rem' }}>
-                <Plus size={20} /> Neues Zubehör
+            <button className="primary-btn" onClick={openNew} style={{ marginBottom: '1rem' }}>
+                <Plus size={20} /> Zubehör hinzufügen
             </button>
 
-            {showForm && (
-                <form onSubmit={handleAdd} className="glass-panel fade-in" style={{ marginBottom: '1.5rem' }}>
-                    <input
-                        type="text"
-                        placeholder="Teilebezeichnung"
-                        className="input-field"
-                        value={newItem.name}
-                        onChange={e => setNewItem({ ...newItem, name: e.target.value })}
-                        required
-                    />
-                    <input
-                        type="text"
-                        placeholder="Marke / Hersteller"
-                        className="input-field"
-                        value={newItem.brand}
-                        onChange={e => setNewItem({ ...newItem, brand: e.target.value })}
-                    />
-                    <input
-                        type="date"
-                        className="input-field"
-                        value={newItem.date}
-                        onChange={e => setNewItem({ ...newItem, date: e.target.value })}
-                    />
-                    <input
-                        type="number"
-                        placeholder="Kaufpreis (€)"
-                        className="input-field"
-                        value={newItem.price}
-                        onChange={e => setNewItem({ ...newItem, price: e.target.value })}
-                        step="0.01"
-                        required
-                    />
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', cursor: 'pointer' }}>
-                        <input
-                            type="checkbox"
-                            checked={newItem.installed}
-                            onChange={e => setNewItem({ ...newItem, installed: e.target.checked })}
-                            style={{ width: '20px', height: '20px', accentColor: 'var(--kawasaki-green)' }}
-                        />
-                        <span>Bereits montiert</span>
-                    </label>
-                    <button type="submit" className="primary-btn">Speichern</button>
-                </form>
+            {items.length === 0 ? (
+                <EmptyState icon={<Package size={32} />} title="Noch kein Zubehör" text="Koffer, Navi-Halter, Sturzbügel – erfasse hier deine Umbauten." />
+            ) : (
+                <div className="list">
+                    {items.map((item) => {
+                        const installed = item.installed !== false;
+                        return (
+                            <button key={item.id} type="button" className="list-row" onClick={() => openEdit(item)}>
+                                <span className="icon-bubble"><Package size={18} /></span>
+                                <span className="list-row-main">
+                                    <span className="list-row-title" style={{ display: 'block' }}>{item.name}</span>
+                                    <span className="list-row-sub" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                        <span style={{ color: installed ? 'var(--ok)' : 'var(--warn)', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                                            {installed ? <CheckCircle2 size={12} /> : <Clock size={12} />}
+                                            {installed ? 'montiert' : 'offen'}
+                                        </span>
+                                        {item.brand && <span>· {item.brand}</span>}
+                                        {item.date && <span>· {formatDate(item.date)}</span>}
+                                    </span>
+                                </span>
+                                <span className="list-row-value">{formatEuro(item.price)}</span>
+                            </button>
+                        );
+                    })}
+                </div>
             )}
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '1rem' }}>
-                {items.map((item) => (
-                    <div key={item.id} className="glass-panel" style={{ padding: '1rem', position: 'relative' }}>
-                        <div style={{ fontWeight: '600', marginBottom: '0.5rem', lineHeight: '1.2' }}>{item.name}</div>
-                        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>{item.brand}</div>
-                        <div style={{ fontSize: '0.9rem', color: 'var(--kawasaki-green)', fontWeight: 'bold' }}>€ {parseFloat(item.price).toFixed(2)}</div>
-                        {item.date && <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.5rem' }}>{item.date}</div>}
-                        <button
-                            onClick={() => handleDelete(item.id)}
-                            style={{
-                                position: 'absolute',
-                                top: '0.5rem',
-                                right: '0.5rem',
-                                background: 'none',
-                                color: 'rgba(255, 255, 255, 0.3)'
-                            }}
-                        >
-                            <Trash2 size={16} />
-                        </button>
+            <Sheet
+                open={editing !== null}
+                onClose={() => setEditing(null)}
+                title={editing === 'new' ? 'Neues Zubehör' : 'Zubehör bearbeiten'}
+                icon={<Package size={20} />}
+            >
+                <form onSubmit={handleSave}>
+                    <Field label="Bezeichnung">
+                        <input className="input-field" type="text" required placeholder="z. B. Topcase 47 L"
+                            value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+                    </Field>
+                    <Field label="Marke / Hersteller">
+                        <input className="input-field" type="text" placeholder="z. B. Givi"
+                            value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })} />
+                    </Field>
+                    <div className="field-row">
+                        <Field label="Kaufpreis (€)">
+                            <input className="input-field num" type="text" inputMode="decimal" placeholder="0,00"
+                                value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
+                        </Field>
+                        <Field label="Kaufdatum">
+                            <input className="input-field" type="date" value={form.date}
+                                onChange={(e) => setForm({ ...form, date: e.target.value })} />
+                        </Field>
                     </div>
-                ))}
-                {items.length === 0 && <p style={{ gridColumn: '1/-1', textAlign: 'center', color: 'var(--text-secondary)' }}>Kein Zubehör eingetragen.</p>}
-            </div>
+                    <label className="switch">
+                        <span style={{ fontWeight: 600 }}>Bereits montiert</span>
+                        <input type="checkbox" checked={form.installed} onChange={(e) => setForm({ ...form, installed: e.target.checked })} />
+                        <span className="switch-track" aria-hidden="true" />
+                    </label>
+                    <div className="sheet-actions">
+                        <button type="submit" className="primary-btn" disabled={saving}>{saving ? 'Speichere …' : 'Speichern'}</button>
+                        {editing && editing !== 'new' && (
+                            <button type="button" className="danger-btn" onClick={handleDelete}><Trash2 size={18} /> Entfernen</button>
+                        )}
+                    </div>
+                </form>
+            </Sheet>
         </div>
     );
 };

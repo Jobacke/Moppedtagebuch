@@ -499,7 +499,7 @@ const Gallery = () => {
                                     }
                                 }}
                                 style={{
-                                    background: isSelectionMode ? 'rgba(105, 190, 40, 0.2)' : 'rgba(255,255,255,0.06)',
+                                    background: isSelectionMode ? 'rgba(var(--accent-rgb), 0.2)' : 'rgba(255,255,255,0.06)',
                                     border: isSelectionMode ? '1px solid var(--kawasaki-green)' : '1px solid rgba(255,255,255,0.12)',
                                     color: isSelectionMode ? 'var(--kawasaki-green)' : 'var(--text-primary)',
                                     borderRadius: '99px',
@@ -521,8 +521,8 @@ const Gallery = () => {
                             type="button"
                             onClick={() => setIsCreatingFolder((prev) => !prev)}
                             style={{
-                                background: 'rgba(105, 190, 40, 0.14)',
-                                border: '1px solid rgba(105, 190, 40, 0.4)',
+                                background: 'rgba(var(--accent-rgb), 0.14)',
+                                border: '1px solid rgba(var(--accent-rgb), 0.4)',
                                 color: 'var(--kawasaki-green)',
                                 borderRadius: '99px',
                                 padding: '5px 11px',
@@ -551,7 +551,7 @@ const Gallery = () => {
                             background: 'rgba(0,0,0,0.28)',
                             padding: '0.6rem',
                             borderRadius: '10px',
-                            border: '1px solid rgba(105, 190, 40, 0.3)',
+                            border: '1px solid rgba(var(--accent-rgb), 0.3)',
                             flexWrap: 'wrap'
                         }}
                     >
@@ -563,7 +563,7 @@ const Gallery = () => {
                             autoFocus
                             style={{
                                 flex: '1 1 200px',
-                                background: '#141414',
+                                background: 'var(--anthracite-900)',
                                 border: '1px solid rgba(255,255,255,0.15)',
                                 borderRadius: '8px',
                                 padding: '8px 11px',
@@ -704,7 +704,7 @@ const Gallery = () => {
                                     onChange={(e) => setRenameFolderValue(e.target.value)}
                                     autoFocus
                                     style={{
-                                        background: '#141414',
+                                        background: 'var(--anthracite-900)',
                                         border: '1px solid var(--kawasaki-green)',
                                         borderRadius: '6px',
                                         padding: '5px 9px',
@@ -781,8 +781,8 @@ const Gallery = () => {
                 <div className="card" style={{
                     marginBottom: '1rem',
                     padding: '0.85rem 1rem',
-                    background: 'rgba(105, 190, 40, 0.1)',
-                    border: '1px solid rgba(105, 190, 40, 0.4)',
+                    background: 'rgba(var(--accent-rgb), 0.1)',
+                    border: '1px solid rgba(var(--accent-rgb), 0.4)',
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
@@ -821,7 +821,7 @@ const Gallery = () => {
                             value={batchTargetFolderId}
                             onChange={(e) => setBatchTargetFolderId(e.target.value)}
                             style={{
-                                background: '#141414',
+                                background: 'var(--anthracite-900)',
                                 color: '#fff',
                                 border: '1px solid rgba(255,255,255,0.2)',
                                 borderRadius: '8px',
@@ -877,9 +877,9 @@ const Gallery = () => {
                             type="button"
                             onClick={() => setMediaFilter(tab.key)}
                             style={{
-                                background: mediaFilter === tab.key ? 'rgba(105, 190, 40, 0.2)' : 'transparent',
+                                background: mediaFilter === tab.key ? 'rgba(var(--accent-rgb), 0.2)' : 'transparent',
                                 color: mediaFilter === tab.key ? 'var(--kawasaki-green)' : 'var(--text-secondary)',
-                                border: mediaFilter === tab.key ? '1px solid rgba(105, 190, 40, 0.4)' : '1px solid transparent',
+                                border: mediaFilter === tab.key ? '1px solid rgba(var(--accent-rgb), 0.4)' : '1px solid transparent',
                                 borderRadius: '7px',
                                 padding: '5px 10px',
                                 fontSize: '0.76rem',
@@ -932,11 +932,11 @@ const Gallery = () => {
                             </span>
                         )}
                     </div>
-                    <div style={{ width: '100%', height: '8px', background: '#2a2a2a', borderRadius: '99px', overflow: 'hidden' }}>
+                    <div style={{ width: '100%', height: '8px', background: 'var(--anthracite-700)', borderRadius: '99px', overflow: 'hidden' }}>
                         <div style={{
                             width: `${progress}%`,
                             height: '100%',
-                            background: 'linear-gradient(90deg, #52991e, var(--kawasaki-green))',
+                            background: 'linear-gradient(90deg, var(--metal-400), var(--kawasaki-green))',
                             borderRadius: '99px',
                             transition: 'width 0.15s linear'
                         }}></div>
@@ -985,7 +985,7 @@ const Gallery = () => {
                                 border: isSelected
                                     ? '2.5px solid var(--kawasaki-green)'
                                     : '1px solid rgba(255,255,255,0.1)',
-                                background: '#1a1a1a',
+                                background: 'var(--anthracite-850)',
                                 transform: isSelected ? 'scale(0.97)' : 'none',
                                 transition: 'transform 0.15s ease, border-color 0.15s ease'
                             }}
@@ -1024,7 +1024,7 @@ const Gallery = () => {
                                             width: '42px',
                                             height: '42px',
                                             borderRadius: '50%',
-                                            background: 'rgba(105, 190, 40, 0.92)',
+                                            background: 'rgba(var(--accent-rgb), 0.92)',
                                             color: '#000',
                                             display: 'flex',
                                             alignItems: 'center',
@@ -1127,7 +1127,7 @@ const Gallery = () => {
                                             onChange={(e) => handleAssignFolderSingle(photo.id, e.target.value)}
                                             title="Ordner zuweisen"
                                             style={{
-                                                background: itemFolder ? 'rgba(105, 190, 40, 0.88)' : 'rgba(0,0,0,0.62)',
+                                                background: itemFolder ? 'rgba(var(--accent-rgb), 0.88)' : 'rgba(0,0,0,0.62)',
                                                 color: itemFolder ? '#000' : '#ddd',
                                                 border: 'none',
                                                 borderRadius: '6px',
@@ -1139,11 +1139,11 @@ const Gallery = () => {
                                                 backdropFilter: 'blur(4px)'
                                             }}
                                         >
-                                            <option value="" style={{ background: '#1a1a1a', color: '#fff' }}>
+                                            <option value="" style={{ background: 'var(--anthracite-850)', color: '#fff' }}>
                                                 📁 Ordner...
                                             </option>
                                             {folders.map((f) => (
-                                                <option key={f.id} value={f.id} style={{ background: '#1a1a1a', color: '#fff' }}>
+                                                <option key={f.id} value={f.id} style={{ background: 'var(--anthracite-850)', color: '#fff' }}>
                                                     📁 {f.name}
                                                 </option>
                                             ))}
@@ -1323,7 +1323,7 @@ const Gallery = () => {
                                     value={selectedImg.folderId && folderMap.has(selectedImg.folderId) ? selectedImg.folderId : ''}
                                     onChange={(e) => handleAssignFolderSingle(selectedImg.id, e.target.value)}
                                     style={{
-                                        background: '#141414',
+                                        background: 'var(--anthracite-900)',
                                         color: '#fff',
                                         border: '1px solid rgba(255,255,255,0.2)',
                                         borderRadius: '6px',
@@ -1348,7 +1348,7 @@ const Gallery = () => {
                                     value={toDateInputValue(selectedImg.date)}
                                     onChange={(e) => handleUpdateItemDate(selectedImg, e.target.value)}
                                     style={{
-                                        background: '#141414',
+                                        background: 'var(--anthracite-900)',
                                         color: '#fff',
                                         border: '1px solid rgba(255,255,255,0.2)',
                                         borderRadius: '6px',

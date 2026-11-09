@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { flushSync } from 'react-dom';
 import { BrowserRouter as Router, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
-import { Lock, Bike, Settings, DollarSign, Wrench, Package, Camera, Zap, RefreshCw } from 'lucide-react';
+import { Lock, Bike, Wallet, Wrench, Plus, RefreshCw, Gauge } from 'lucide-react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { useDocument, useCollection, triggerManualFirestoreRefresh } from './hooks/useFirestore';
 import Dashboard from './components/Dashboard';
@@ -9,11 +10,14 @@ import Finance from './components/Finance';
 import Service from './components/Service';
 import Accessories from './components/Accessories';
 import Gallery from './components/Gallery';
+import MachineSection from './components/MachineSection';
 import Login from './components/Login';
 import PinLock from './components/PinLock';
 import QuickEntryModal from './components/QuickEntryModal';
 import ErrorBoundary from './components/ErrorBoundary';
 import './index.css';
+
+const APP_VERSION = 'v1.15';
 
 function parseQuickUrlParams() {
   const params = new URLSearchParams(window.location.search);
@@ -88,6 +92,8 @@ function MainRouter() {
   );
 }
 
+const MACHINE_PATHS = ['/tech', '/accessories', '/gallery'];
+
 function MainLayout({ onLock }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -117,87 +123,72 @@ function MainLayout({ onLock }) {
     return () => clearInterval(interval);
   }, []);
 
+  // Beim Seitenwechsel nach oben scrollen
+  useEffect(() => {
+    window.scrollTo({ top: 0 });
+  }, [location.pathname]);
+
   const handleManualSync = () => {
     setIsRefreshing(true);
     triggerManualFirestoreRefresh();
     setTimeout(() => setIsRefreshing(false), 700);
   };
 
-  const navItems = [
-    { path: '/', label: 'Übersicht', icon: <Bike size={20} /> },
-    { path: '/tech', label: 'Technik', icon: <Settings size={20} /> },
-    { path: '/finance', label: 'Finanzen', icon: <DollarSign size={20} /> },
-    { path: '/service', label: 'Service', icon: <Wrench size={20} /> },
-    { path: '/accessories', label: 'Zubehör', icon: <Package size={20} /> },
-    { path: '/gallery', label: 'Galerie', icon: <Camera size={20} /> },
+  // Seitenwechsel mit sanfter View-Transition (wo unterstützt)
+  const go = useCallback((path, options) => {
+    if (path === location.pathname && !options?.state) return;
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (document.startViewTransition && !reduceMotion) {
+      document.startViewTransition(() => {
+        flushSync(() => navigate(path, options));
+      });
+    } else {
+      navigate(path, options);
+    }
+  }, [navigate, location.pathname]);
+
+  const openQuick = () => setIsQuickModalOpen(true);
+
+  const isMachine = MACHINE_PATHS.includes(location.pathname);
+  const tabs = [
+    { path: '/', label: 'Übersicht', icon: <Gauge size={22} />, active: location.pathname === '/' },
+    { path: '/finance', label: 'Kosten', icon: <Wallet size={22} />, active: location.pathname === '/finance' },
+    { fab: true },
+    { path: '/service', label: 'Service', icon: <Wrench size={22} />, active: location.pathname === '/service' },
+    { path: '/tech', label: 'Maschine', icon: <Bike size={22} />, active: isMachine },
   ];
 
   return (
-    <div className="app-container fade-in">
-      <header style={{ padding: '1rem 1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-          <h1 style={{ margin: 0, fontSize: '1.2rem', color: 'var(--kawasaki-green)' }}>Moppedtagebuch</h1>
-          <span style={{
-            fontSize: '0.68rem',
-            color: 'var(--text-secondary)',
-            background: 'rgba(255, 255, 255, 0.06)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-            padding: '1px 6px',
-            borderRadius: '6px',
-            fontWeight: '600',
-            letterSpacing: '0.3px'
-          }}>v1.14</span>
+    <div className="app-container">
+      <header className="topbar">
+        <div className="brand">
+          <div className="brand-mark" aria-hidden="true"><Bike size={20} /></div>
+          <span className="brand-name">Moppedtagebuch</span>
+          <span className="version-badge">{APP_VERSION}</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <div className="topbar-actions">
           <button
-            onClick={() => setIsQuickModalOpen(true)}
-            style={{
-              background: 'rgba(105, 190, 40, 0.16)',
-              border: '1px solid rgba(105, 190, 40, 0.4)',
-              color: 'var(--kawasaki-green)',
-              borderRadius: '999px',
-              padding: '6px 11px',
-              fontSize: '0.76rem',
-              fontWeight: '700',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px'
-            }}
-            title="Schnell-Eintrag öffnen"
-          >
-            <Zap size={14} /> Schnell-Check
-          </button>
-          <button
+            className="icon-btn"
             onClick={handleManualSync}
-            style={{
-              background: 'rgba(255,255,255,0.07)',
-              border: '1px solid rgba(255,255,255,0.12)',
-              color: isRefreshing ? 'var(--kawasaki-green)' : 'var(--text-secondary)',
-              borderRadius: '50%',
-              width: '32px',
-              height: '32px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }}
+            aria-label="Jetzt mit Cloud synchronisieren"
             title="Jetzt mit Cloud synchronisieren"
           >
-            <RefreshCw size={16} className={isRefreshing ? 'spin-icon' : ''} />
+            <RefreshCw size={18} className={isRefreshing ? 'spin-icon' : ''} />
           </button>
-          <button onClick={onLock} style={{ background: 'none', color: 'var(--text-secondary)', padding: '4px' }} title="App sperren">
-            <Lock size={19} />
+          <button className="icon-btn" onClick={onLock} aria-label="App sperren" title="App sperren">
+            <Lock size={18} />
           </button>
         </div>
       </header>
 
-      <main style={{ padding: '0 1rem 6rem 1rem' }}>
+      <main className="app-main">
         <Routes>
-          <Route path="/" element={<Dashboard onOpenQuickEntry={() => setIsQuickModalOpen(true)} />} />
-          <Route path="/tech" element={<TechnicalData />} />
+          <Route path="/" element={<Dashboard onOpenQuickEntry={openQuick} onNavigate={go} />} />
           <Route path="/finance" element={<Finance />} />
           <Route path="/service" element={<Service />} />
-          <Route path="/accessories" element={<Accessories />} />
-          <Route path="/gallery" element={<Gallery />} />
+          <Route path="/tech" element={<MachineSection onNavigate={go}><TechnicalData /></MachineSection>} />
+          <Route path="/accessories" element={<MachineSection onNavigate={go}><Accessories /></MachineSection>} />
+          <Route path="/gallery" element={<MachineSection onNavigate={go}><Gallery /></MachineSection>} />
         </Routes>
       </main>
 
@@ -214,27 +205,31 @@ function MainLayout({ onLock }) {
         onClearParams={clearUrlParams}
       />
 
-      <nav className="nav-bar">
-        {navItems.map((item) => (
-          <button
-            key={item.path}
-            className={`nav-item ${location.pathname === item.path ? 'active' : ''}`}
-            onClick={() => navigate(item.path)}
-          >
-            {item.icon}
-            <span className="nav-label">{item.label}</span>
-          </button>
-        ))}
+      <nav className="nav-bar" aria-label="Hauptnavigation">
+        {tabs.map((tab) =>
+          tab.fab ? (
+            <button
+              key="fab"
+              className="nav-fab"
+              onClick={openQuick}
+              aria-label="KM-Stand oder Tankrechnung erfassen"
+              title="KM & Tanken erfassen"
+            >
+              <Plus size={28} strokeWidth={2.6} />
+            </button>
+          ) : (
+            <button
+              key={tab.path}
+              className={`nav-item ${tab.active ? 'active' : ''}`}
+              onClick={() => go(tab.path)}
+              aria-current={tab.active ? 'page' : undefined}
+            >
+              {tab.icon}
+              <span className="nav-label">{tab.label}</span>
+            </button>
+          )
+        )}
       </nav>
-      <style>{`
-        @keyframes spin360 {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-        }
-        .spin-icon {
-            animation: spin360 0.6s linear infinite;
-        }
-      `}</style>
     </div>
   );
 }

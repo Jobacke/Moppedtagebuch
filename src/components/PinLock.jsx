@@ -27,112 +27,82 @@ const PinLock = ({ onUnlock }) => {
         setPin(pin.slice(0, -1));
     };
 
+    const keys = [1, 2, 3, 4, 5, 6, 7, 8, 9, null, 0, 'del'];
+
     return (
-        <div className="pin-container" style={{
+        <div className="pin-container fade-in" style={{
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'center',
             alignItems: 'center',
-            height: '100vh',
-            background: 'radial-gradient(circle at center, #2e2e2e, #121212)'
+            minHeight: '100dvh',
+            padding: '2rem 1rem'
         }}>
-            <div className={`lock-icon ${error ? 'shake' : ''}`} style={{
-                marginBottom: '2rem',
-                color: error ? '#ff4d4f' : 'var(--kawasaki-green)',
-                transition: 'color 0.3s'
+            <div className={`brand-mark ${error ? 'shake' : ''}`} style={{
+                width: 72,
+                height: 72,
+                borderRadius: 24,
+                marginBottom: '1.25rem',
+                color: error ? 'var(--danger)' : 'var(--accent-contrast)'
             }}>
-                <Lock size={48} />
+                <Lock size={32} />
             </div>
+            <h2 style={{ margin: '0 0 0.3rem', fontSize: '1.4rem' }}>Moppedtagebuch</h2>
+            <p style={{ margin: '0 0 2rem', color: error ? 'var(--danger)' : 'var(--text-secondary)' }}>
+                {error ? 'Falscher PIN – bitte erneut versuchen' : 'PIN eingeben'}
+            </p>
 
-            <div className="pin-indicator" style={{ display: 'flex', gap: '1rem', marginBottom: '3rem' }}>
+            <div style={{ display: 'flex', gap: '1.1rem', marginBottom: '2.5rem' }} aria-live="polite" aria-label={`${pin.length} von 4 Ziffern`}>
                 {[...Array(4)].map((_, i) => (
                     <div key={i} style={{
-                        width: '12px',
-                        height: '12px',
+                        width: 14,
+                        height: 14,
                         borderRadius: '50%',
-                        background: i < pin.length ? 'var(--kawasaki-green)' : 'rgba(255, 255, 255, 0.2)',
+                        background: i < pin.length ? 'var(--metal-silver)' : 'transparent',
+                        border: '1.5px solid ' + (error ? 'var(--danger)' : 'var(--metal-300)'),
                         transition: 'all 0.2s',
-                        transform: i < pin.length ? 'scale(1.2)' : 'scale(1)'
+                        transform: i < pin.length ? 'scale(1.1)' : 'scale(1)'
                     }} />
                 ))}
             </div>
 
-            <div className="keypad" style={{
+            <div style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(3, 1fr)',
-                gap: '1.5rem',
-                width: '100%',
-                maxWidth: '300px'
+                gridTemplateColumns: 'repeat(3, 76px)',
+                gap: '1.1rem 1.6rem',
+                justifyContent: 'center'
             }}>
-                {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
-                    <button
-                        key={num}
-                        onClick={() => handleInput(num)}
-                        className="keypad-btn"
-                        style={{
-                            width: '70px',
-                            height: '70px',
-                            borderRadius: '50%',
-                            background: 'rgba(255, 255, 255, 0.1)',
-                            color: 'white',
-                            fontSize: '1.5rem',
-                            border: 'none',
-                            backdropFilter: 'blur(10px)',
-                            cursor: 'pointer',
-                            transition: 'background 0.2s'
-                        }}
-                    >
-                        {num}
-                    </button>
-                ))}
-                <div /> {/* Spacer */}
-                <button
-                    onClick={() => handleInput(0)}
-                    className="keypad-btn"
-                    style={{
-                        width: '70px',
-                        height: '70px',
-                        borderRadius: '50%',
-                        background: 'rgba(255, 255, 255, 0.1)',
-                        color: 'white',
-                        fontSize: '1.5rem',
-                        border: 'none',
-                        backdropFilter: 'blur(10px)'
-                    }}
-                >
-                    0
-                </button>
-                <button
-                    onClick={handleDelete}
-                    className="keypad-btn"
-                    style={{
-                        width: '70px',
-                        height: '70px',
-                        borderRadius: '50%',
-                        background: 'rgba(255, 255, 255, 0.1)',
-                        color: 'white',
-                        fontSize: '1rem',
-                        border: 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        backdropFilter: 'blur(10px)',
-                        cursor: 'pointer',
-                        transition: 'background 0.2s'
-                    }}
-                >
-                    <Delete size={28} />
-                </button>
+                {keys.map((k, i) => {
+                    if (k === null) return <div key={i} />;
+                    const isDel = k === 'del';
+                    return (
+                        <button
+                            key={i}
+                            onClick={() => (isDel ? handleDelete() : handleInput(k))}
+                            aria-label={isDel ? 'Letzte Ziffer löschen' : String(k)}
+                            className="keypad-btn"
+                            style={{
+                                width: 76,
+                                height: 76,
+                                borderRadius: '50%',
+                                display: 'grid',
+                                placeItems: 'center',
+                                fontSize: '1.7rem',
+                                fontWeight: 500,
+                                color: 'var(--text-primary)',
+                                background: isDel ? 'transparent' : 'var(--metal-surface)',
+                                border: isDel ? 'none' : '1px solid var(--border-strong)',
+                                boxShadow: isDel ? 'none' : 'var(--shadow-card)'
+                            }}
+                        >
+                            {isDel ? <Delete size={26} /> : k}
+                        </button>
+                    );
+                })}
             </div>
 
             <style>{`
-        @keyframes shake {
-          0%, 100% { transform: translateX(0); }
-          25% { transform: translateX(-10px); }
-          75% { transform: translateX(10px); }
-        }
-        .shake { animation: shake 0.3s ease-in-out; }
-        .keypad-btn:active { background: rgba(105, 190, 40, 0.3) !important; transform: scale(0.95); }
+        .keypad-btn:active { background: rgba(var(--accent-rgb), 0.22) !important; }
       `}</style>
         </div>
     );

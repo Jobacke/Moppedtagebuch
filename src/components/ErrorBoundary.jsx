@@ -18,10 +18,10 @@ class ErrorBoundary extends Component {
     render() {
         if (this.state.hasError) {
             return (
-                <div style={{ padding: '2rem', color: 'white', background: '#121212', minHeight: '100vh' }}>
-                    <h1 style={{ color: '#ff4d4f' }}>Hoppla, ein Fehler ist aufgetreten.</h1>
+                <div style={{ padding: '2rem', color: 'var(--text-primary)', minHeight: '100vh' }}>
+                    <h1 style={{ color: 'var(--danger)' }}>Hoppla, ein Fehler ist aufgetreten.</h1>
                     <p>Bitte lade die Seite neu oder versuche es später noch einmal.</p>
-                    <details style={{ marginTop: '1rem', color: '#666', whiteSpace: 'pre-wrap' }}>
+                    <details style={{ marginTop: '1rem', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>
                         <summary>Details anzeigen</summary>
                         {this.state.error && this.state.error.toString()}
                         <br />
@@ -32,8 +32,9 @@ class ErrorBoundary extends Component {
                         style={{
                             marginTop: '1rem',
                             padding: '10px 20px',
-                            background: 'var(--kawasaki-green)',
-                            borderRadius: '8px',
+                            background: 'var(--metal-silver)',
+                            color: 'var(--accent-contrast)',
+                            borderRadius: '999px',
                             border: 'none',
                             fontWeight: 'bold',
                             cursor: 'pointer'

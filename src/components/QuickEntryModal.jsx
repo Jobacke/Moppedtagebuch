@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Zap, X, Check, Fuel, Gauge } from 'lucide-react';
+import { X, Check, Fuel, Gauge, Wrench, Cog, Receipt } from 'lucide-react';
+import { todayIso, formatNumber } from '../utils/format';
 
 const CATEGORIES = [
-    { value: 'Fuel', label: '⛽ Tanken' },
-    { value: 'Service', label: '🔧 Wartung' },
-    { value: 'Parts', label: '🔩 Teile' },
-    { value: 'Other', label: '📦 Sonstiges' },
+    { value: 'Fuel', label: 'Tanken', icon: Fuel },
+    { value: 'Service', label: 'Wartung', icon: Wrench },
+    { value: 'Parts', label: 'Teile', icon: Cog },
+    { value: 'Other', label: 'Sonstiges', icon: Receipt },
 ];
 
 const QUICK_KM_INCREMENTS = [50, 100, 200, 350, 500];
@@ -26,14 +27,14 @@ const QuickEntryModal = ({
     const [station, setStation] = useState('');
     const [cat, setCat] = useState('Fuel');
     const [desc, setDesc] = useState('');
-    const [date, setDate] = useState(() => new Date().toISOString().split('T')[0]);
+    const [date, setDate] = useState(() => todayIso());
     const [saving, setSaving] = useState(false);
     const [savedSuccess, setSavedSuccess] = useState(null);
 
     useEffect(() => {
         if (!isOpen) return;
 
-        const today = new Date().toISOString().split('T')[0];
+        const today = todayIso();
         setDate(initialParams.date || today);
 
         if (initialParams.km) {
@@ -80,7 +81,7 @@ const QuickEntryModal = ({
                 targetStation: initialParams.station || '',
                 targetCat: initialParams.cat || 'Fuel',
                 targetDesc: initialParams.desc || '',
-                targetDate: initialParams.date || new Date().toISOString().split('T')[0]
+                targetDate: initialParams.date || todayIso()
             });
         }
     }, [isOpen, initialParams, techData, currentKmNum]);
@@ -111,7 +112,7 @@ const QuickEntryModal = ({
 
             if (!isNaN(numericAmount) && numericAmount > 0) {
                 const isFuel = targetCat === 'Fuel';
-                const categoryLabel = CATEGORIES.find(c => c.value === targetCat)?.label.replace(/^[^\s]+\s/, '') || 'Tanken';
+                const categoryLabel = CATEGORIES.find(c => c.value === targetCat)?.label || 'Tanken';
                 let finalDesc = '';
 
                 if (isFuel) {
@@ -178,69 +179,23 @@ const QuickEntryModal = ({
 
     return (
         <div
-            style={{
-                position: 'fixed',
-                inset: 0,
-                background: 'rgba(0, 0, 0, 0.82)',
-                backdropFilter: 'blur(10px)',
-                WebkitBackdropFilter: 'blur(10px)',
-                zIndex: 1000,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: '1rem'
-            }}
+            className="sheet-backdrop"
             onClick={(e) => {
                 if (e.target === e.currentTarget) onClose();
             }}
         >
-            <div
-                className="glass-panel fade-in"
-                style={{
-                    width: '100%',
-                    maxWidth: '440px',
-                    maxHeight: '90vh',
-                    overflowY: 'auto',
-                    border: '1px solid rgba(105, 190, 40, 0.45)',
-                    background: 'linear-gradient(160deg, rgba(25, 38, 25, 0.96), rgba(18, 18, 18, 0.98))',
-                    padding: '1.5rem',
-                    position: 'relative'
-                }}
-            >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.2rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                        <div style={{
-                            background: 'rgba(105, 190, 40, 0.2)',
-                            color: 'var(--kawasaki-green)',
-                            padding: '8px',
-                            borderRadius: '12px',
-                            display: 'flex'
-                        }}>
-                            <Zap size={22} />
-                        </div>
+            <div className="sheet" role="dialog" aria-modal="true" aria-label="KM-Stand und Tankrechnung erfassen">
+                <div className="sheet-handle" />
+                <div className="sheet-header">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <div className="icon-bubble"><Gauge size={20} /></div>
                         <div>
-                            <h3 style={{ margin: 0, fontSize: '1.2rem', color: 'var(--text-primary)' }}>
-                                KM & Tankrechnung
-                            </h3>
-                            <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                                Versys 1000 SE • Aktuell {currentKmNum || '---'} km
-                            </span>
+                            <h3 className="sheet-title">KM & Tanken</h3>
+                            <p className="sheet-subtitle num">Aktuell {currentKmNum ? `${formatNumber(currentKmNum)} km` : '–'}</p>
                         </div>
                     </div>
-                    <button
-                        onClick={onClose}
-                        style={{
-                            background: 'rgba(255,255,255,0.08)',
-                            color: 'var(--text-secondary)',
-                            borderRadius: '50%',
-                            width: '34px',
-                            height: '34px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center'
-                        }}
-                    >
-                        <X size={18} />
+                    <button type="button" className="icon-btn" onClick={onClose} aria-label="Schließen">
+                        <X size={20} />
                     </button>
                 </div>
 
@@ -250,17 +205,17 @@ const QuickEntryModal = ({
                         style={{
                             textAlign: 'center',
                             padding: '2rem 1rem',
-                            background: 'rgba(105, 190, 40, 0.15)',
-                            borderRadius: '16px',
-                            border: '1px solid var(--kawasaki-green)'
+                            background: 'rgba(var(--ok-rgb), 0.08)',
+                            borderRadius: '20px',
+                            border: '1px solid rgba(var(--ok-rgb), 0.35)'
                         }}
                     >
                         <div style={{
                             width: '56px',
                             height: '56px',
                             borderRadius: '50%',
-                            background: 'var(--kawasaki-green)',
-                            color: '#000',
+                            background: 'var(--ok)',
+                            color: 'var(--accent-contrast)',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
@@ -268,7 +223,7 @@ const QuickEntryModal = ({
                         }}>
                             <Check size={32} strokeWidth={3} />
                         </div>
-                        <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '1.2rem', color: 'var(--kawasaki-green)' }}>
+                        <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '1.2rem', color: 'var(--ok)' }}>
                             Gespeichert!
                         </h4>
                         <p style={{ margin: 0, color: 'var(--text-primary)', fontSize: '0.95rem' }}>
@@ -280,33 +235,28 @@ const QuickEntryModal = ({
                         {/* KM Section */}
                         <div style={{ marginBottom: '1.2rem' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
-                                <label style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                    <Gauge size={15} color="var(--kawasaki-green)" /> Neuer KM-Stand
+                                <label className="field-label" htmlFor="quick-km">
+                                    Neuer KM-Stand
                                 </label>
                                 {kmDelta > 0 && (
-                                    <span style={{
-                                        fontSize: '0.78rem',
-                                        background: 'rgba(105, 190, 40, 0.2)',
-                                        color: 'var(--kawasaki-green)',
-                                        padding: '2px 8px',
-                                        borderRadius: '99px',
-                                        fontWeight: '600'
-                                    }}>
-                                        +{kmDelta} km gefahren
+                                    <span className="status-pill status-ok num" style={{ padding: '2px 9px' }}>
+                                        +{formatNumber(kmDelta)} km gefahren
                                     </span>
                                 )}
                             </div>
 
                             <input
+                                id="quick-km"
                                 type="number"
                                 inputMode="numeric"
-                                className="input-field"
+                                className="input-field num"
                                 placeholder={`z. B. ${currentKmNum + 150}`}
                                 value={km}
                                 onChange={(e) => setKm(e.target.value)}
                                 style={{
-                                    fontSize: '1.35rem',
-                                    fontWeight: '700',
+                                    fontSize: '1.8rem',
+                                    fontWeight: '800',
+                                    minHeight: '64px',
                                     marginBottom: '0.6rem',
                                     textAlign: 'center',
                                     letterSpacing: '0.5px'
@@ -320,16 +270,8 @@ const QuickEntryModal = ({
                                         key={inc}
                                         type="button"
                                         onClick={() => handleAddIncrement(inc)}
-                                        style={{
-                                            flex: '1 1 auto',
-                                            background: 'rgba(105, 190, 40, 0.14)',
-                                            border: '1px solid rgba(105, 190, 40, 0.35)',
-                                            color: 'var(--kawasaki-green)',
-                                            borderRadius: '10px',
-                                            padding: '6px 8px',
-                                            fontSize: '0.8rem',
-                                            fontWeight: '600'
-                                        }}
+                                        className="chip"
+                                        style={{ flex: '1 1 auto', padding: '0 0.6rem', color: 'var(--text-primary)' }}
                                     >
                                         +{inc} km
                                     </button>
@@ -338,14 +280,8 @@ const QuickEntryModal = ({
                                     <button
                                         type="button"
                                         onClick={() => setKm(String(currentKmNum))}
-                                        style={{
-                                            background: 'rgba(255,255,255,0.06)',
-                                            border: '1px solid rgba(255,255,255,0.12)',
-                                            color: 'var(--text-secondary)',
-                                            borderRadius: '10px',
-                                            padding: '6px 8px',
-                                            fontSize: '0.75rem'
-                                        }}
+                                        className="chip"
+                                        style={{ padding: '0 0.7rem' }}
                                     >
                                         Reset
                                     </button>
@@ -356,35 +292,30 @@ const QuickEntryModal = ({
                         {/* Tankrechnung / Expense Section */}
                         <div style={{
                             padding: '1rem',
-                            background: 'rgba(0, 0, 0, 0.25)',
-                            borderRadius: '14px',
+                            background: 'rgba(0, 0, 0, 0.22)',
+                            borderRadius: '20px',
                             border: '1px solid var(--border-color)',
                             marginBottom: '1.2rem'
                         }}>
-                            <label style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '0.6rem' }}>
-                                <Fuel size={15} color="var(--kawasaki-green)" /> Tankrechnung / Ausgabe erfassen (optional)
+                            <label className="field-label" style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '0.7rem' }}>
+                                <Fuel size={14} /> Tankrechnung / Ausgabe (optional)
                             </label>
 
                             <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
-                                {CATEGORIES.map((c) => (
-                                    <button
-                                        key={c.value}
-                                        type="button"
-                                        onClick={() => setCat(c.value)}
-                                        style={{
-                                            flex: '1 1 45%',
-                                            padding: '7px 10px',
-                                            borderRadius: '10px',
-                                            fontSize: '0.8rem',
-                                            fontWeight: '600',
-                                            background: cat === c.value ? 'var(--kawasaki-green)' : 'rgba(255,255,255,0.06)',
-                                            color: cat === c.value ? '#000' : 'var(--text-secondary)',
-                                            border: cat === c.value ? 'none' : '1px solid rgba(255,255,255,0.1)'
-                                        }}
-                                    >
-                                        {c.label}
-                                    </button>
-                                ))}
+                                {CATEGORIES.map((c) => {
+                                    const Icon = c.icon;
+                                    return (
+                                        <button
+                                            key={c.value}
+                                            type="button"
+                                            onClick={() => setCat(c.value)}
+                                            className={`chip ${cat === c.value ? 'active' : ''}`}
+                                            style={{ flex: '1 1 45%' }}
+                                        >
+                                            <Icon size={14} /> {c.label}
+                                        </button>
+                                    );
+                                })}
                             </div>
 
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.3fr', gap: '0.6rem', marginBottom: '0.6rem' }}>
@@ -434,8 +365,8 @@ const QuickEntryModal = ({
                             className="primary-btn"
                             disabled={saving}
                         >
-                            <Zap size={18} />
-                            {saving ? 'Speichere...' : 'Jetzt speichern'}
+                            <Check size={20} strokeWidth={2.6} />
+                            {saving ? 'Speichere …' : 'Speichern'}
                         </button>
                     </form>
                 )}
