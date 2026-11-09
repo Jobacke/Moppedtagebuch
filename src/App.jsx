@@ -15,9 +15,10 @@ import Login from './components/Login';
 import PinLock from './components/PinLock';
 import QuickEntryModal from './components/QuickEntryModal';
 import ErrorBoundary from './components/ErrorBoundary';
+import { createPinRecord, verifyPin } from './utils/pin';
 import './index.css';
 
-const APP_VERSION = 'v1.15';
+const APP_VERSION = 'v1.16';
 
 function parseQuickUrlParams() {
   const params = new URLSearchParams(window.location.search);
@@ -54,35 +55,75 @@ function App() {
 
 function MainRouter() {
   const { currentUser } = useAuth();
-  const [pin] = useState(localStorage.getItem('mopped_pin') || '3706');
-  const [isLocked, setIsLocked] = useState(() => {
-    const unlockedUntil = parseInt(localStorage.getItem('mopped_unlocked_until') || '0', 10);
-    const hasQuickLink = Boolean(parseQuickUrlParams());
-    if (unlockedUntil > Date.now() || hasQuickLink) {
-      return false;
-    }
-    return true;
-  });
 
   if (!currentUser) {
     return <Login />;
   }
 
+  return <PinGate />;
+}
+
+const UNLOCK_KEY = 'mopped_unlocked_until';
+const UNLOCK_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
+
+function PinGate() {
+  // PIN liegt nur als PBKDF2-Hash in users/{uid}/data/security – nie im Quellcode
+  const { data: security, update: updateSecurity, loading } = useDocument('security');
+  const hasQuickLink = Boolean(parseQuickUrlParams());
+  const [isLocked, setIsLocked] = useState(() => {
+    const unlockedUntil = parseInt(localStorage.getItem(UNLOCK_KEY) || '0', 10);
+    return !(unlockedUntil > Date.now() || hasQuickLink);
+  });
+
+  // Alte, im Code hinterlegte PIN-Überschreibung entfernen
+  useEffect(() => {
+    localStorage.removeItem('mopped_pin');
+  }, []);
+
+  const unlock = () => {
+    localStorage.setItem(UNLOCK_KEY, String(Date.now() + UNLOCK_DURATION_MS));
+    setIsLocked(false);
+  };
+
   const handleLock = () => {
-    localStorage.removeItem('mopped_unlocked_until');
+    localStorage.removeItem(UNLOCK_KEY);
     setIsLocked(true);
   };
 
+  if (loading && !security) {
+    return (
+      <div style={{ minHeight: '100dvh', display: 'grid', placeItems: 'center' }}>
+        <div className="brand-mark" style={{ width: 64, height: 64, borderRadius: 20 }}><Lock size={30} /></div>
+      </div>
+    );
+  }
+
+  const hasPin = Boolean(security?.pinHash);
+
+  // Noch kein eigener PIN → einmalig festlegen (Schnell-Links aus der Mail funktionieren trotzdem)
+  if (!hasPin && !hasQuickLink) {
+    return (
+      <PinLock
+        mode="setup"
+        onSetPin={async (newPin) => {
+          await updateSecurity(await createPinRecord(newPin));
+          unlock();
+        }}
+      />
+    );
+  }
+
   if (isLocked) {
-    const checkPin = (inputPin) => {
-      if (inputPin === pin) {
-        localStorage.setItem('mopped_unlocked_until', String(Date.now() + 7 * 24 * 60 * 60 * 1000));
-        setIsLocked(false);
-        return true;
-      }
-      return false;
-    };
-    return <PinLock onUnlock={checkPin} />;
+    return (
+      <PinLock
+        mode="unlock"
+        onUnlock={async (inputPin) => {
+          const ok = await verifyPin(inputPin, security);
+          if (ok) unlock();
+          return ok;
+        }}
+      />
+    );
   }
 
   return (

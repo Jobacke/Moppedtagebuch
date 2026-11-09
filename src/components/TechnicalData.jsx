@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Pencil, Check, X } from 'lucide-react';
+import { Pencil, Check, X, KeyRound, ChevronRight } from 'lucide-react';
 import { useDocument } from '../hooks/useFirestore';
 import { LoadingBlock } from './ui';
+import ChangePinSheet from './ChangePinSheet';
 import { formatKm, formatDate } from '../utils/format';
 
 const DEFAULTS = {
@@ -74,6 +75,7 @@ const TechnicalData = () => {
     const [localData, setLocalData] = useState(DEFAULTS);
     const [isEditing, setIsEditing] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [pinSheetOpen, setPinSheetOpen] = useState(false);
 
     useEffect(() => {
         if (remoteData && !isEditing) {
@@ -156,6 +158,19 @@ const TechnicalData = () => {
                     </div>
                 </div>
             ))}
+
+            <div className="group-header"><span>Sicherheit</span></div>
+            <div className="list">
+                <button type="button" className="list-row" onClick={() => setPinSheetOpen(true)}>
+                    <span className="icon-bubble"><KeyRound size={18} /></span>
+                    <span className="list-row-main">
+                        <span className="list-row-title" style={{ display: 'block' }}>App-PIN ändern</span>
+                        <span className="list-row-sub" style={{ display: 'block' }}>4-stelliger PIN zum Entsperren</span>
+                    </span>
+                    <ChevronRight size={16} color="var(--text-tertiary)" />
+                </button>
+            </div>
+            <ChangePinSheet open={pinSheetOpen} onClose={() => setPinSheetOpen(false)} />
 
             {localData?.lastUpdated && (
                 <p className="stat-sub" style={{ textAlign: 'center', marginTop: '1.2rem' }}>
