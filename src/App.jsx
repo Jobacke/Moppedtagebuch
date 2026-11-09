@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { flushSync } from 'react-dom';
 import { BrowserRouter as Router, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
-import { Lock, Bike, Wallet, Wrench, Plus, RefreshCw, Gauge } from 'lucide-react';
+import { Lock, Wallet, Wrench, Plus, RefreshCw, Gauge } from 'lucide-react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { useDocument, useCollection, triggerManualFirestoreRefresh } from './hooks/useFirestore';
 import Dashboard from './components/Dashboard';
@@ -16,10 +16,11 @@ import PinLock from './components/PinLock';
 import QuickEntryModal from './components/QuickEntryModal';
 import ErrorBoundary from './components/ErrorBoundary';
 import BikeEmblem from './components/BikeEmblem';
+import MotorbikeIcon from './components/MotorbikeIcon';
 import { createPinRecord, verifyPin } from './utils/pin';
 import './index.css';
 
-const APP_VERSION = 'v1.20';
+const APP_VERSION = 'v1.21';
 
 function parseQuickUrlParams() {
   const params = new URLSearchParams(window.location.search);
@@ -197,14 +198,14 @@ function MainLayout({ onLock }) {
     { path: '/finance', label: 'Kosten', icon: <Wallet size={22} />, active: location.pathname === '/finance' },
     { fab: true },
     { path: '/service', label: 'Service', icon: <Wrench size={22} />, active: location.pathname === '/service' },
-    { path: '/tech', label: 'Maschine', icon: <Bike size={22} />, active: isMachine },
+    { path: '/tech', label: 'Maschine', icon: <MotorbikeIcon size={22} />, active: isMachine },
   ];
 
   return (
     <div className="app-container">
       <header className="topbar">
         <div className="brand">
-          <div className="brand-mark" aria-hidden="true"><Bike size={20} /></div>
+          <img className="brand-mark" src={`${import.meta.env.BASE_URL}icon-192.png?v=2`} alt="" width={36} height={36} draggable="false" />
           <span className="brand-name">Moppedtagebuch</span>
           <span className="version-badge">{APP_VERSION}</span>
         </div>
