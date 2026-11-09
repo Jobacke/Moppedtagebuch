@@ -1,10 +1,12 @@
 {
   "name": "Moppedtagebuch",
   "short_name": "Moppedtagebuch",
+  "lang": "de",
   "start_url": ".",
   "display": "standalone",
-  "background_color": "#1a1a1a",
-  "theme_color": "#69BE28",
+  "orientation": "portrait",
+  "background_color": "#16181a",
+  "theme_color": "#16181a",
   "icons": [
     {
       "src": "icon.png",
