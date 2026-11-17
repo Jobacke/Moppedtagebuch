@@ -27,8 +27,11 @@ Eine moderne Web-App (PWA) zur Verwaltung aller Daten rund um deine Kawasaki Ver
 
 ## Deployment
 
-Die App wird automatisch via GitHub Pages bereitgestellt:
-[https://Jobacke.github.io/Moppedtagebuch/](https://Jobacke.github.io/Moppedtagebuch/)
+Bei jedem Push auf `main` baut der Workflow „Deploy to GitHub Pages“ die App und veröffentlicht sie im Zweig
+`gh-pages` (früher von Hand mit `npm run deploy`). Adresse: [https://tagebuch.vjbackhaus.de](https://tagebuch.vjbackhaus.de)
+
+Jede Veröffentlichung schreibt `/version.json`. Die App fragt sie beim Öffnen, beim Zurückkehren und alle
+10 Minuten ab und zeigt bei neuerem Stand „Neue Version verfügbar – Neu laden“ (kein Cache-Leeren nötig).
 
 ## Sicherheit
 
