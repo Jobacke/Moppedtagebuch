@@ -15,12 +15,13 @@ import Login from './components/Login';
 import PinLock from './components/PinLock';
 import QuickEntryModal from './components/QuickEntryModal';
 import ErrorBoundary from './components/ErrorBoundary';
+import UpdateBanner from './components/UpdateBanner';
 import BikeEmblem from './components/BikeEmblem';
 import MotorbikeIcon from './components/MotorbikeIcon';
 import { createPinRecord, verifyPin } from './utils/pin';
 import './index.css';
 
-const APP_VERSION = 'v1.21';
+const APP_VERSION = 'v1.22';
 
 function parseQuickUrlParams() {
   const params = new URLSearchParams(window.location.search);
@@ -51,6 +52,7 @@ function App() {
       <AuthProvider>
         <MainRouter />
       </AuthProvider>
+      <UpdateBanner />
     </ErrorBoundary>
   );
 }
