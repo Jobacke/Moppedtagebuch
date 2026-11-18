@@ -20,7 +20,7 @@ import MotorbikeIcon from './components/MotorbikeIcon';
 import { createPinRecord, verifyPin } from './utils/pin';
 import './index.css';
 
-const APP_VERSION = 'v1.21';
+const APP_VERSION = 'v1.23';
 
 function parseQuickUrlParams() {
   const params = new URLSearchParams(window.location.search);
@@ -70,9 +70,11 @@ const UNLOCK_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
 
 function PinGate() {
   // PIN liegt nur als PBKDF2-Hash in users/{uid}/data/security – nie im Quellcode
+  const { requireAuth } = useAuth();
   const { data: security, update: updateSecurity, loading } = useDocument('security');
   const hasQuickLink = Boolean(parseQuickUrlParams());
   const [isLocked, setIsLocked] = useState(() => {
+    if (!requireAuth) return false;
     const unlockedUntil = parseInt(localStorage.getItem(UNLOCK_KEY) || '0', 10);
     return !(unlockedUntil > Date.now() || hasQuickLink);
   });
@@ -92,7 +94,7 @@ function PinGate() {
     setIsLocked(true);
   };
 
-  if (loading && !security) {
+  if (requireAuth && loading && !security) {
     return (
       <div style={{ minHeight: '100dvh', display: 'grid', placeItems: 'center' }}>
         <BikeEmblem size={170} state="pulse" />
@@ -102,8 +104,8 @@ function PinGate() {
 
   const hasPin = Boolean(security?.pinHash);
 
-  // Noch kein eigener PIN → einmalig festlegen (Schnell-Links aus der Mail funktionieren trotzdem)
-  if (!hasPin && !hasQuickLink) {
+  // PIN-Setup nur verlangen, wenn Passwort-/PIN-Schutz aktiviert ist (oder manuell gesperrt wurde)
+  if ((requireAuth || isLocked) && !hasPin && !hasQuickLink) {
     return (
       <PinLock
         mode="setup"
