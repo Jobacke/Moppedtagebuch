@@ -15,6 +15,7 @@ import Login from './components/Login';
 import PinLock from './components/PinLock';
 import QuickEntryModal from './components/QuickEntryModal';
 import ErrorBoundary from './components/ErrorBoundary';
+import UpdateBanner from './components/UpdateBanner';
 import BikeEmblem from './components/BikeEmblem';
 import MotorbikeIcon from './components/MotorbikeIcon';
 import { createPinRecord, verifyPin } from './utils/pin';
@@ -51,6 +52,7 @@ function App() {
       <AuthProvider>
         <MainRouter />
       </AuthProvider>
+      <UpdateBanner />
     </ErrorBoundary>
   );
 }
