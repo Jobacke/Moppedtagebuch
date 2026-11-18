@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Pencil, Check, X, KeyRound, ChevronRight } from 'lucide-react';
+import { Pencil, Check, X, KeyRound, ChevronRight, Lock, UserCheck } from 'lucide-react';
 import { useDocument } from '../hooks/useFirestore';
+import { useAuth } from '../contexts/AuthContext';
 import { LoadingBlock } from './ui';
 import ChangePinSheet from './ChangePinSheet';
 import { formatKm, formatDate } from '../utils/format';
@@ -71,6 +72,7 @@ const prettify = (key) => {
 };
 
 const TechnicalData = () => {
+    const { currentUser, requireAuth, setRequireAuth, logout } = useAuth();
     const { data: remoteData, update, loading } = useDocument('technical_data');
     const [localData, setLocalData] = useState(DEFAULTS);
     const [isEditing, setIsEditing] = useState(false);
@@ -159,13 +161,35 @@ const TechnicalData = () => {
                 </div>
             ))}
 
-            <div className="group-header"><span>Sicherheit</span></div>
+            <div className="group-header"><span>Sicherheit &amp; Anmeldung</span></div>
             <div className="list">
+                <button type="button" className="list-row" onClick={() => setRequireAuth(!requireAuth)}>
+                    <span className="icon-bubble"><Lock size={18} /></span>
+                    <span className="list-row-main">
+                        <span className="list-row-title" style={{ display: 'block' }}>Passwort- &amp; PIN-Abfrage beim Start</span>
+                        <span className="list-row-sub" style={{ display: 'block' }}>
+                            {requireAuth ? 'Aktiv – Anmeldung & PIN beim Öffnen erforderlich' : 'Aus (Standard) – Direktstart ohne Passwort'}
+                        </span>
+                    </span>
+                    <span className="version-badge" style={{ marginLeft: 'auto' }}>{requireAuth ? 'EIN' : 'AUS'}</span>
+                </button>
                 <button type="button" className="list-row" onClick={() => setPinSheetOpen(true)}>
                     <span className="icon-bubble"><KeyRound size={18} /></span>
                     <span className="list-row-main">
                         <span className="list-row-title" style={{ display: 'block' }}>App-PIN ändern</span>
                         <span className="list-row-sub" style={{ display: 'block' }}>4-stelliger PIN zum Entsperren</span>
+                    </span>
+                    <ChevronRight size={16} color="var(--text-tertiary)" />
+                </button>
+                <button type="button" className="list-row" onClick={() => logout()}>
+                    <span className="icon-bubble"><UserCheck size={18} /></span>
+                    <span className="list-row-main">
+                        <span className="list-row-title" style={{ display: 'block' }}>
+                            {currentUser?.isDefaultUser ? 'Mit Cloud-Konto anmelden' : 'Cloud-Konto abmelden'}
+                        </span>
+                        <span className="list-row-sub" style={{ display: 'block' }}>
+                            {currentUser?.isDefaultUser ? 'Direktstart aktiv (Johannes)' : `Angemeldet als ${currentUser?.email || 'Johannes'}`}
+                        </span>
                     </span>
                     <ChevronRight size={16} color="var(--text-tertiary)" />
                 </button>

@@ -53,15 +53,37 @@ function readCollectionSnapshot(snapshot) {
     return docs;
 }
 
+function readLocalCache(cacheKey, fallback) {
+    try {
+        const raw = localStorage.getItem(cacheKey);
+        if (raw) return JSON.parse(raw);
+    } catch {}
+    return fallback;
+}
+
+function writeLocalCache(cacheKey, val) {
+    try {
+        localStorage.setItem(cacheKey, JSON.stringify(val));
+    } catch {}
+}
+
 function startListener(entry, spec) {
     if (entry.unsubscribe) return;
+    const cacheKey = `mopped_cache_${spec.kind}_${spec.name}`;
+    if (spec.isLocalOnly) {
+        const cached = readLocalCache(cacheKey, spec.kind === 'collection' ? [] : null);
+        setEntry(entry, { data: cached, loading: false, error: null });
+        entry.unsubscribe = () => {};
+        return;
+    }
     const onError = (err) => {
         console.error(`Firestore-Fehler (${entry.key}):`, err);
         if (entry.unsubscribe) {
             entry.unsubscribe();
             entry.unsubscribe = null;
         }
-        setEntry(entry, { error: err, loading: false });
+        const cached = readLocalCache(cacheKey, spec.kind === 'collection' ? [] : null);
+        setEntry(entry, { data: entry.data !== undefined ? entry.data : cached, error: err, loading: false });
         // Automatisch neu verbinden, solange jemand die Daten braucht
         clearTimeout(entry.retryTimer);
         entry.retryTimer = setTimeout(() => {
@@ -73,13 +95,21 @@ function startListener(entry, spec) {
         const q = query(collection(db, spec.path), orderBy('date', 'desc'));
         entry.unsubscribe = onSnapshot(
             q,
-            (snapshot) => setEntry(entry, { data: readCollectionSnapshot(snapshot), loading: false, error: null }),
+            (snapshot) => {
+                const docs = readCollectionSnapshot(snapshot);
+                writeLocalCache(cacheKey, docs);
+                setEntry(entry, { data: docs, loading: false, error: null });
+            },
             onError
         );
     } else {
         entry.unsubscribe = onSnapshot(
             doc(db, spec.path),
-            (snap) => setEntry(entry, { data: snap.exists() ? snap.data() : null, loading: false, error: null }),
+            (snap) => {
+                const val = snap.exists() ? snap.data() : null;
+                if (val) writeLocalCache(cacheKey, val);
+                setEntry(entry, { data: val, loading: false, error: null });
+            },
             onError
         );
     }
@@ -94,6 +124,12 @@ function stopListener(entry) {
 }
 
 async function refreshEntry(entry, spec) {
+    if (spec.isLocalOnly) {
+        const cacheKey = `mopped_cache_${spec.kind}_${spec.name}`;
+        const cached = readLocalCache(cacheKey, spec.kind === 'collection' ? [] : null);
+        setEntry(entry, { data: cached, loading: false, error: null });
+        return;
+    }
     if (entry.refreshing) return entry.refreshing;
     entry.refreshing = (async () => {
         try {
@@ -178,25 +214,46 @@ function useStoreEntry(spec) {
 
 export function useCollection(collectionName) {
     const { currentUser } = useAuth();
+    const isLocalOnly = Boolean(currentUser?.isDefaultUser);
     const path = currentUser ? `users/${currentUser.uid}/${collectionName}` : null;
-    const entry = useStoreEntry(path ? { kind: 'collection', path } : null);
+    const cacheKey = `mopped_cache_collection_${collectionName}`;
+    const entry = useStoreEntry(path ? { kind: 'collection', path, name: collectionName, isLocalOnly } : null);
 
     const refresh = useCallback(() => (entry ? refreshEntry(entry, entry.spec) : Promise.resolve()), [entry]);
 
     const add = async (item) => {
         if (!path) return;
+        if (isLocalOnly) {
+            const list = readLocalCache(cacheKey, []);
+            const next = [{ ...item, id: item.id || `local_${Date.now()}` }, ...list];
+            writeLocalCache(cacheKey, next);
+            if (entry) setEntry(entry, { data: next, loading: false, error: null });
+            return;
+        }
         await addDoc(collection(db, path), item);
         await refresh();
     };
 
     const remove = async (id) => {
         if (!path) return;
+        if (isLocalOnly) {
+            const list = readLocalCache(cacheKey, []).filter((x) => x.id !== id);
+            writeLocalCache(cacheKey, list);
+            if (entry) setEntry(entry, { data: list, loading: false, error: null });
+            return;
+        }
         await deleteDoc(doc(db, path, id));
         await refresh();
     };
 
     const update = async (id, patch) => {
         if (!path || !id) return;
+        if (isLocalOnly) {
+            const list = readLocalCache(cacheKey, []).map((x) => (x.id === id ? { ...x, ...patch } : x));
+            writeLocalCache(cacheKey, list);
+            if (entry) setEntry(entry, { data: list, loading: false, error: null });
+            return;
+        }
         await setDoc(doc(db, path, id), patch, { merge: true });
         await refresh();
     };
@@ -214,16 +271,25 @@ export function useCollection(collectionName) {
 
 export function useDocument(docName) {
     const { currentUser } = useAuth();
+    const isLocalOnly = Boolean(currentUser?.isDefaultUser);
     const path = currentUser ? `users/${currentUser.uid}/data/${docName}` : null;
-    const entry = useStoreEntry(path ? { kind: 'doc', path } : null);
+    const cacheKey = `mopped_cache_doc_${docName}`;
+    const entry = useStoreEntry(path ? { kind: 'doc', path, name: docName, isLocalOnly } : null);
 
     const refresh = useCallback(() => (entry ? refreshEntry(entry, entry.spec) : Promise.resolve()), [entry]);
 
     const update = useCallback(async (newData) => {
         if (!path) return;
+        if (isLocalOnly) {
+            const prev = readLocalCache(cacheKey, {}) || {};
+            const merged = { ...prev, ...newData };
+            writeLocalCache(cacheKey, merged);
+            if (entry) setEntry(entry, { data: merged, loading: false, error: null });
+            return;
+        }
         await setDoc(doc(db, path), newData, { merge: true });
         await refresh();
-    }, [path, refresh]);
+    }, [path, isLocalOnly, cacheKey, entry, refresh]);
 
     return {
         data: entry?.data ?? null,

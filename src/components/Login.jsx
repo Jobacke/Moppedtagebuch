@@ -5,7 +5,7 @@ import BikeEmblem from './BikeEmblem';
 export default function Login() {
     const emailRef = useRef();
     const passwordRef = useRef();
-    const { login, signup } = useAuth();
+    const { login, signup, skipLogin } = useAuth();
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
     const [isLogin, setIsLogin] = useState(true);
@@ -63,6 +63,14 @@ export default function Login() {
 
                     <button disabled={loading} className="primary-btn" type="submit" style={{ marginTop: '0.6rem' }}>
                         {loading ? 'Bitte warten …' : isLogin ? 'Anmelden' : 'Registrieren'}
+                    </button>
+                    <button
+                        type="button"
+                        className="secondary-btn"
+                        onClick={skipLogin}
+                        style={{ marginTop: '0.6rem', width: '100%', justifyContent: 'center' }}
+                    >
+                        Ohne Passwort direkt starten
                     </button>
                 </form>
 
