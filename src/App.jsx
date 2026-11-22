@@ -21,7 +21,7 @@ import MotorbikeIcon from './components/MotorbikeIcon';
 import { createPinRecord, verifyPin } from './utils/pin';
 import './index.css';
 
-const APP_VERSION = 'v1.25';
+const APP_VERSION = 'v1.26';
 
 function parseQuickUrlParams() {
   const params = new URLSearchParams(window.location.search);

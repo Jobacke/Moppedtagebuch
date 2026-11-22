@@ -8,17 +8,21 @@ export function generateBotScriptWithToken({ refreshToken, uid, email, currentKm
 
   return `/**
  * ============================================================================
- * 🏍️ MOPPEDTAGEBUCH – TÄGLICHER E-MAIL-BOT & TANKRECHNUNGS-ASSISTENT
+ * 🏍️ MOPPEDTAGEBUCH – E-MAIL-BOT, TANKRECHNUNGEN & RIDELINK-WEBHOOK (iPhone)
  * ============================================================================
  * ✅ AUTOMATISCH MIT DEINEM MOPPEDTAGEBUCH-ACCOUNT VERKNÜPFT!
  *
- * Was du einfach als Antwort auf die tägliche Mail schreiben kannst:
- * 1. Nur Tankrechnung (Betrag, Datum, Tankstelle):
- *    z.B. "36,48, 19.10. Avia" oder "45,15, 30.08.2026, Shell Himmelkron"
- * 2. Nur neuer KM-Stand:
- *    z.B. "39250" oder "+180"
- * 3. Kombi (KM-Stand + Betrag + Datum + Tankstelle):
- *    z.B. "39250, 36,48, 19.10. Avia"
+ * 1) E-Mail-Antwort auf die tägliche Mail:
+ *    - Tankrechnung: "36,48, 19.10. Avia" oder "45,15, 30.08.2026, Shell Himmelkron"
+ *    - Nur KM-Stand: "39250" oder "+180"
+ *    - Kombi:        "39250, 36,48, 19.10. Avia"
+ *
+ * 2) RideLink iPhone-Kurzbefehl (Variante B – lautlos im Hintergrund):
+ *    - Einmalig in Google Apps Script oben rechts auf "Bereitstellen" ->
+ *      "Neue Bereitstellung" -> Typ "Web-App" -> Ausführen als "Ich" ->
+ *      Zugriff "Jeder" -> Bereitstellen klicken und die Web-App-URL kopieren.
+ *    - Der iPhone-Kurzbefehl sendet den OCR-Text aus dem RideLink-Screenshot
+ *      per POST (JSON: { token, ocrText }) direkt an diese URL.
  *
  * Einfach speichern (Cmd + S) und oben auf "▷ Ausführen" klicken!
  */
@@ -35,7 +39,11 @@ const CONFIG = {
   FIREBASE_PROJECT_ID: "moppedtagebuch",
   FIREBASE_API_KEY: "AIzaSyCU4b7reiVNHjqvuEM7cXSLGilCmZ5YYlM",
   FIREBASE_UID: "${safeUid}",
-  FIREBASE_REFRESH_TOKEN: "${safeToken}"
+  FIREBASE_REFRESH_TOKEN: "${safeToken}",
+
+  // Geheim-Token für den RideLink iPhone-Kurzbefehl (Webhook)
+  WEBHOOK_SECRET: "RL-7vK9mP4xN2qW8zB5cH3jF",
+  RIDELINK_MAX_SINGLE_JUMP_KM: 15000
 };
 
 /**
@@ -551,6 +559,314 @@ function getFirebaseAuth() {
     Logger.log("Firebase Auth Fehler: " + e);
   }
   return null;
+}
+
+// ============================================================================
+// 📱 RIDELINK iPHONE-KURZBEFEHL WEBHOOK (Variante B – lautlos im Hintergrund)
+// ============================================================================
+
+function doGet(e) {
+  const params = (e && e.parameter) ? e.parameter : {};
+  const format = String(params.format || "text").toLowerCase();
+
+  if (!isValidWebhookToken(params.token)) {
+    return buildWebhookResponse(false, "❌ Ungültiges Token.", {}, format);
+  }
+
+  if (params.km || params.ocrText || params.text) {
+    return handleRideLinkSync(params);
+  }
+
+  const state = getCurrentBikeState();
+  const currentKm = parseInt(state.currentKm || CONFIG.DEFAULT_KM, 10) || 0;
+  return buildWebhookResponse(
+    true,
+    \`✅ Moppedtagebuch RideLink-Webhook aktiv! \${CONFIG.BIKE_NAME} steht aktuell bei \${currentKm.toLocaleString("de-DE")} km.\`,
+    { currentKm: currentKm, bike: CONFIG.BIKE_NAME },
+    format
+  );
+}
+
+function doPost(e) {
+  let payload = {};
+  if (e && e.postData && e.postData.contents) {
+    const raw = String(e.postData.contents);
+    try {
+      payload = JSON.parse(raw);
+    } catch (err) {
+      if (e.parameter && Object.keys(e.parameter).length > 0) {
+        payload = Object.assign({}, e.parameter);
+      } else {
+        payload = { ocrText: raw };
+      }
+    }
+  }
+
+  if (e && e.parameter) {
+    if (!payload.token && e.parameter.token) payload.token = e.parameter.token;
+    if (!payload.format && e.parameter.format) payload.format = e.parameter.format;
+    if (payload.silentIfUnchanged === undefined && e.parameter.silentIfUnchanged !== undefined) {
+      payload.silentIfUnchanged = e.parameter.silentIfUnchanged;
+    }
+    if (payload.force === undefined && e.parameter.force !== undefined) {
+      payload.force = e.parameter.force;
+    }
+  }
+
+  return handleRideLinkSync(payload);
+}
+
+function isValidWebhookToken(token) {
+  return Boolean(token) && String(token).trim() === String(CONFIG.WEBHOOK_SECRET).trim();
+}
+
+function isTruthyFlag(val) {
+  return val === true || val === 1 || String(val || "").toLowerCase() === "true" || String(val || "") === "1";
+}
+
+function buildWebhookResponse(ok, message, extra, format) {
+  if (format === "json") {
+    const body = Object.assign({ ok: ok, message: message }, extra || {});
+    return ContentService
+      .createTextOutput(JSON.stringify(body))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  return ContentService
+    .createTextOutput(String(message || ""))
+    .setMimeType(ContentService.MimeType.TEXT);
+}
+
+function parseRideLinkKmNumber(numStr) {
+  if (!numStr) return null;
+  const cleaned = String(numStr).replace(/\\s+/g, "").trim();
+  if (!cleaned || !/^\\d[\\d.,]*$/.test(cleaned)) return null;
+
+  const hasDot = cleaned.indexOf(".") !== -1;
+  const hasComma = cleaned.indexOf(",") !== -1;
+
+  let value = NaN;
+  if (hasDot && hasComma) {
+    const lastDot = cleaned.lastIndexOf(".");
+    const lastComma = cleaned.lastIndexOf(",");
+    if (lastComma > lastDot) {
+      value = parseFloat(cleaned.replace(/\\./g, "").replace(",", "."));
+    } else {
+      value = parseFloat(cleaned.replace(/,/g, ""));
+    }
+  } else if (hasDot || hasComma) {
+    const sep = hasDot ? "." : ",";
+    const parts = cleaned.split(sep);
+    if (parts.length === 2 && parts[1].length >= 1 && parts[1].length <= 2) {
+      value = parseFloat(parts[0] + "." + parts[1]);
+    } else {
+      value = parseInt(parts.join(""), 10);
+    }
+  } else {
+    value = parseInt(cleaned, 10);
+  }
+
+  if (isNaN(value) || value <= 0) return null;
+  return {
+    raw: value,
+    rounded: Math.round(value)
+  };
+}
+
+function extractRideLinkDataFromText(rawText, currentKm) {
+  const text = String(rawText || "");
+  if (!text.trim()) {
+    return { km: null, rawKm: null, battery: null, source: "empty" };
+  }
+
+  let battery = null;
+  const batMatch = text.match(/([+-]?\\d{1,2}[.,]\\d)\\s*V\\b/i);
+  if (batMatch) {
+    battery = batMatch[1].replace(/^\\+/, "").replace(".", ",") + " V";
+  }
+
+  const labelMatch = text.match(/(?:Gesamtstrecke|Total\\s*distance|Kilometerstand)[\\s\\S]{0,80}?(\\d{1,3}(?:[.,\\s]\\d{3})+(?:[.,]\\d{1,2})?|\\d{4,7}(?:[.,]\\d{1,2})?)\\s*km\\b/i);
+  if (labelMatch) {
+    const parsed = parseRideLinkKmNumber(labelMatch[1]);
+    if (parsed) {
+      return {
+        km: parsed.rounded,
+        rawKm: parsed.raw,
+        battery: battery,
+        source: "ridelink_gesamtstrecke"
+      };
+    }
+  }
+
+  const kmRegex = /(\\d{1,3}(?:[.,\\s]\\d{3})+(?:[.,]\\d{1,2})?|\\d{4,7}(?:[.,]\\d{1,2})?)\\s*km\\b/gi;
+  const candidates = [];
+  let m;
+  while ((m = kmRegex.exec(text)) !== null) {
+    const parsed = parseRideLinkKmNumber(m[1]);
+    if (parsed && parsed.rounded >= 1000 && parsed.rounded <= 500000) {
+      candidates.push(parsed);
+    }
+  }
+
+  if (candidates.length > 0) {
+    if (currentKm > 0) {
+      const plausible = candidates.filter(
+        c => c.rounded >= currentKm - 500 && c.rounded <= currentKm + CONFIG.RIDELINK_MAX_SINGLE_JUMP_KM
+      );
+      if (plausible.length > 0) {
+        plausible.sort((a, b) => b.rounded - a.rounded);
+        return {
+          km: plausible[0].rounded,
+          rawKm: plausible[0].raw,
+          battery: battery,
+          source: "fallback_plausible"
+        };
+      }
+    }
+    candidates.sort((a, b) => b.rounded - a.rounded);
+    return {
+      km: candidates[0].rounded,
+      rawKm: candidates[0].raw,
+      battery: battery,
+      source: "fallback_max"
+    };
+  }
+
+  return { km: null, rawKm: null, battery: battery, source: "not_found" };
+}
+
+function handleRideLinkSync(payload) {
+  const format = String((payload && payload.format) || "text").toLowerCase();
+  const silentIfUnchanged = isTruthyFlag(payload && payload.silentIfUnchanged);
+  const force = isTruthyFlag(payload && payload.force);
+
+  if (!payload || !isValidWebhookToken(payload.token)) {
+    return buildWebhookResponse(false, "❌ Ungültiges Token.", {}, format);
+  }
+
+  const liveState = getCurrentBikeState();
+  const oldKm = parseInt(liveState.currentKm || CONFIG.DEFAULT_KM, 10) || 0;
+  const nextService = parseInt(liveState.nextServiceDue || CONFIG.DEFAULT_NEXT_SERVICE, 10) || CONFIG.DEFAULT_NEXT_SERVICE;
+
+  let extracted = { km: null, rawKm: null, battery: null, source: "direct" };
+  if (payload.km !== undefined && payload.km !== null && String(payload.km).trim() !== "") {
+    const parsedDirect = parseRideLinkKmNumber(payload.km);
+    if (parsedDirect) {
+      extracted.km = parsedDirect.rounded;
+      extracted.rawKm = parsedDirect.raw;
+    }
+  } else {
+    const ocrText = payload.ocrText || payload.text || "";
+    extracted = extractRideLinkDataFromText(ocrText, oldKm);
+  }
+
+  const batterySuffix = extracted.battery ? \` • Akku: \${extracted.battery}\` : "";
+
+  if (!extracted.km) {
+    if (silentIfUnchanged) {
+      return buildWebhookResponse(true, "", { skipped: true, reason: "not_found" }, format);
+    }
+    return buildWebhookResponse(
+      false,
+      '⚠️ Kein Kilometerstand erkannt. Bitte in RideLink den Tab "Fahrzeug" (mit "Gesamtstrecke") öffnen.',
+      { oldKm: oldKm, source: extracted.source },
+      format
+    );
+  }
+
+  const newKm = extracted.km;
+  const diff = newKm - oldKm;
+
+  if (newKm === oldKm) {
+    if (silentIfUnchanged) {
+      return buildWebhookResponse(true, "", { unchanged: true, currentKm: oldKm }, format);
+    }
+    return buildWebhookResponse(
+      true,
+      \`ℹ️ \${CONFIG.BIKE_NAME}: Kilometerstand bereits aktuell (\${oldKm.toLocaleString("de-DE")} km)\${batterySuffix}\`,
+      { unchanged: true, oldKm: oldKm, newKm: newKm, battery: extracted.battery },
+      format
+    );
+  }
+
+  if (newKm < oldKm && !force) {
+    return buildWebhookResponse(
+      false,
+      \`⚠️ Erkannter Stand (\${newKm.toLocaleString("de-DE")} km) ist kleiner als im Moppedtagebuch (\${oldKm.toLocaleString("de-DE")} km) – nichts überschrieben.\`,
+      { oldKm: oldKm, detectedKm: newKm },
+      format
+    );
+  }
+
+  if (oldKm > 0 && diff > CONFIG.RIDELINK_MAX_SINGLE_JUMP_KM && !force) {
+    const maybeMissedDot = Math.round(newKm / 10);
+    const hint = (maybeMissedDot >= oldKm && maybeMissedDot <= oldKm + 5000)
+      ? \` (evtl. Dezimalpunkt bei \${maybeMissedDot.toLocaleString("de-DE")} km übersehen)\`
+      : "";
+    return buildWebhookResponse(
+      false,
+      \`⚠️ Plausibilitäts-Stopp: \${newKm.toLocaleString("de-DE")} km liegt zu weit über \${oldKm.toLocaleString("de-DE")} km\${hint} – nichts überschrieben.\`,
+      { oldKm: oldKm, detectedKm: newKm },
+      format
+    );
+  }
+
+  const now = new Date();
+  const parsedEntry = {
+    km: newKm,
+    addKm: null,
+    amount: null,
+    cat: "Fuel",
+    station: "",
+    desc: "",
+    date: Utilities.formatDate(now, "Europe/Berlin", "yyyy-MM-dd"),
+    dateDisplay: Utilities.formatDate(now, "Europe/Berlin", "dd.MM.yyyy")
+  };
+
+  const res = applyParsedEntry(parsedEntry, liveState);
+  if (!res.wroteDirectToFirestore) {
+    return buildWebhookResponse(
+      false,
+      "❌ Fehler beim Speichern in Firebase – bitte Token/Verbindung in Apps Script prüfen.",
+      { oldKm: oldKm, newKm: newKm },
+      format
+    );
+  }
+
+  const kmToService = Math.max(0, nextService - newKm);
+  const diffStr = diff > 0 ? \` (+\${diff.toLocaleString("de-DE")} km)\` : "";
+  const msg = \`✅ \${CONFIG.BIKE_NAME}: \${newKm.toLocaleString("de-DE")} km\${diffStr} gespeichert! • Service in \${kmToService.toLocaleString("de-DE")} km\${batterySuffix}\`;
+
+  Logger.log("📱 RideLink-Webhook Sync: " + msg);
+
+  return buildWebhookResponse(
+    true,
+    msg,
+    {
+      oldKm: oldKm,
+      newKm: newKm,
+      diffKm: diff,
+      rawKm: extracted.rawKm,
+      kmToService: kmToService,
+      battery: extracted.battery,
+      source: extracted.source
+    },
+    format
+  );
+}
+
+function testRideLinkOcrParser() {
+  const sampleOcr = [
+    "Bike v",
+    "Letzte Position",
+    "Hauptstraße 93C, Neubiberg",
+    "Gesamtstrecke",
+    "46064.9km",
+    ") 21t 12H",
+    "+12.3V",
+    "BATTERIE"
+  ].join("\\n");
+  const result = extractRideLinkDataFromText(sampleOcr, 45784);
+  Logger.log("🧪 Test-Ergebnis: " + JSON.stringify(result));
 }
 `;
 }
