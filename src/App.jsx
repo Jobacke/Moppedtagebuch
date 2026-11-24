@@ -21,7 +21,7 @@ import MotorbikeIcon from './components/MotorbikeIcon';
 import { createPinRecord, verifyPin } from './utils/pin';
 import './index.css';
 
-const APP_VERSION = 'v1.26';
+const APP_VERSION = '1.26.1';
 
 function parseQuickUrlParams() {
   const params = new URLSearchParams(window.location.search);
@@ -211,7 +211,7 @@ function MainLayout({ onLock }) {
         <div className="brand">
           <img className="brand-mark" src={`${import.meta.env.BASE_URL}icon-192.png?v=2`} alt="" width={36} height={36} draggable="false" />
           <span className="brand-name">Moppedtagebuch</span>
-          <span className="version-badge">{APP_VERSION}</span>
+          <span className="version-badge">Version {APP_VERSION}</span>
         </div>
         <div className="topbar-actions">
           <button
