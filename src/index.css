@@ -204,12 +204,34 @@ button:disabled {
   user-select: none;
 }
 
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  line-height: 1.15;
+}
+
 .brand-name {
   font-family: var(--font-display);
   font-weight: 700;
   font-size: 1.05rem;
   letter-spacing: -0.01em;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Versionsnummer als dezente Unterzeile unter dem App-Namen –
+   kollidiert so weder mit dem Titel noch mit den Aktions-Buttons. */
+.brand-version {
+  margin-top: 2px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .version-badge {
@@ -227,6 +249,7 @@ button:disabled {
 .topbar-actions {
   display: flex;
   gap: 0.4rem;
+  flex-shrink: 0;
 }
 
 /* --------------------------------------------------------------------------
